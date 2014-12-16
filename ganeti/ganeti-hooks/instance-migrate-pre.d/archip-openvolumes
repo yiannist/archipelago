@@ -34,10 +34,13 @@ def archip_premigrate_disk(idx):
     vol_name = os.getenv("GANETI_INSTANCE_DISK%d_NAME" % idx)
     if not vol_name:
         vol_name = os.getenv("GANETI_INSTANCE_DISK%d_ID" % idx)
-    template = os.getenv("GANETI_INSTANCE_DISK%d_TEMPLATE_NAME" % idx)
 
-    if template != 'ext':
-        raise Exception("Invalid disk template %s" % template)
+    dev_type = os.getenv("GANETI_INSTANCE_DISK%d_TEMPLATE_NAME" % idx)
+    if not dev_type:
+        dev_type = os.getenv("GANETI_INSTANCE_DISK%d_DEV_TYPE" % idx)
+
+    if dev_type != 'ext':
+        return 0
 
     if provider != 'archipelago' and provider != 'vlmc':
         return 0
@@ -51,13 +54,8 @@ def archip_premigrate_disk(idx):
 
 
 def archip_premigrate():
-    try:
-        count = os.getenv("GANETI_INSTANCE_DISK_COUNT")
-        template = os.getenv("GANETI_INSTANCE_DISK_TEMPLATE")
-    except:
-        return 1
-
-    if template != 'ext':
+    count = os.getenv("GANETI_INSTANCE_DISK_COUNT")
+    if count is None:
         return 0
 
     count = int(count)
