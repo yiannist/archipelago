@@ -1375,35 +1375,15 @@ struct map *get_map(struct peer_req *pr, char *name, uint32_t namelen,
           retry:
             r = open_load_map(pr, map, flags);
             if (r < 0) {
-                if (map->volumelen > MAPPER_PREFIX_LEN &&
-                    !strncmp(map->volume, MAPPER_PREFIX, MAPPER_PREFIX_LEN)) {
-                    dropcache(pr, map);
-                    /* signal map here, so any other threads that
-                     * tried to get the map, but couldn't because
-                     * of the opening or loading operation that
-                     * failed, can continue.
-                     */
-                    signal_map(map);
-                    put_map(map);
-                    return NULL;
-                }
-                char archip_name[MAX_VOLUME_LEN + 1];
-                sprintf(archip_name, "%.*s%.*s", MAPPER_PREFIX_LEN,
-                        MAPPER_PREFIX, namelen, name);
-                change_map_volume(map, archip_name,
-                                  MAPPER_PREFIX_LEN + namelen);
-                archip_map = 1;
-                goto retry;
-            }
-
-            if (archip_map && map->state & MF_MAP_EXCLUSIVE) {
-                r = rename_map(pr, map, name, namelen, 1);
-                if (r < 0) {
-                    XSEGLOG2(&lc, E,
-                             "Could not rename map, continuing with the old map");
-                } else {
-                    //FIXME WHAT HERE????
-                }
+                dropcache(pr, map);
+                /* signal map here, so any other threads that
+                 * tried to get the map, but couldn't because
+                 * of the opening or loading operation that
+                 * failed, can continue.
+                 */
+                signal_map(map);
+                put_map(map);
+                return NULL;
             }
 
             /* If the map is deleted, drop everything and return
