@@ -27,11 +27,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <mapper-version0.h>
 #include <mapper-version1.h>
 #include <mapper-version2.h>
+#include <mapper-version3.h>
 
 /* Alternative, each header file could define an appropriate MAP_V# */
-enum { MAP_V0, MAP_V1, MAP_V2 };
-#define MAP_LATEST_VERSION MAP_V2
-#define MAP_LATEST_MOPS &v2_ops
+enum { MAP_V0, MAP_V1, MAP_V2, MAP_V3};
+#define MAP_LATEST_VERSION MAP_V3
+#define MAP_LATEST_MOPS &v3_ops
 
 struct header_struct {
     uint32_t signature;
@@ -42,7 +43,7 @@ struct header_struct {
 #define MAX_MAPHEADER_SIZE (sizeof(struct header_struct))
 
 /* should always be the minimum blocksize required by all versions */
-#define MIN_BLOCKSIZE (v2_objectsize_in_map)
+#define MIN_BLOCKSIZE (v3_objectsize_in_map)
 /* should always be the maximum objectlen of all versions */
 #define MAX_OBJECT_LEN 123
 
@@ -62,6 +63,10 @@ struct header_struct {
 #error 	"XSEG_MAX_TARGETLEN should be at least MAX_OBJECT_LEN"
 #endif
 
+#if MAX_OBJECT_LEN < v3_max_objectlen
+#error "MAX_OBJECT_LEN is smaller than v3_max_objectlen"
+#endif
+
 #if MAX_OBJECT_LEN < v2_max_objectlen
 #error "MAX_OBJECT_LEN is smaller than v2_max_objectlen"
 #endif
@@ -75,6 +80,10 @@ struct header_struct {
 #endif
 
 /* TODO Use some form of static assert for the following. Comment out for now.
+
+#if MAX_MAPHEADER_SIZE < v3_mapheader_size
+#error "MAX_MAPHEADER_SIZE is smaller than v3_mapheader_size"
+#endif
 
 #if MAX_MAPHEADER_SIZE < v2_mapheader_size
 #error "MAX_MAPHEADER_SIZE is smaller than v2_mapheader_size"
