@@ -176,6 +176,7 @@ struct map_node {
 /* map flags */
 #define MF_MAP_READONLY		(1 << 0)
 #define MF_MAP_DELETED		(1 << 1)
+#define MF_MAP_GCSCANED		(1 << 2)
 
 /* run time map state flags */
 #define MF_MAP_LOADING		(1 << 0)
