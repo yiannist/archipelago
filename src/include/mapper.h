@@ -160,6 +160,7 @@ typedef void (*cb_t) (struct peer_req * pr, struct xseg_request * req);
 
 #define MF_OBJECT_NOT_READY	(MF_OBJECT_COPYING|MF_OBJECT_WRITING|\
 				MF_OBJECT_DELETING|MF_OBJECT_SNAPSHOTTING)
+
 struct mapping {
     uint32_t flags;
     volatile uint32_t state;
@@ -170,6 +171,10 @@ struct mapping {
     volatile uint32_t ref;
     volatile uint32_t waiters;
     st_cond_t cond;
+
+    uint32_t vol_epoch;
+    unsigned name_idx:30;
+    unsigned pad:2;
 };
 
 
