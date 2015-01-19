@@ -208,20 +208,27 @@ struct mapping {
  * Stands for Archipelago Map Format */
 #define MAP_SIGNATURE (uint32_t)(0x414d462e)
 
+struct vol_idx {
+    uint16_t len;
+    char *name;
+};
+
 struct map {
     uint32_t version;
     uint32_t signature;
     uint64_t epoch;
     uint32_t flags;
-    volatile uint32_t state;
     uint64_t size;
     uint32_t blocksize;
+
     uint64_t nr_objs;
     uint32_t volumelen;
     char volume[MAX_VOLUME_LEN + 1];    /* NULL terminated string */
     char key[MAX_VOLUME_LEN + 1];       /* NULL terminated string, for cache */
     struct mapping *objects;
     volatile uint32_t ref;
+
+    volatile uint32_t state;
     volatile uint32_t waiters;
     st_cond_t cond;
     uint64_t opened_count;
@@ -230,6 +237,31 @@ struct map {
     volatile uint32_t users;
     volatile uint32_t waiters_users;
     st_cond_t users_cond;
+
+    /* Length of hexlified CA name */
+    uint32_t cas_size;
+    /* Length in bytes of the cas_array (hexlified) */
+    uint64_t cas_array_len;
+    /* Length in bytes of the vol_array in the form of
+     *  length | STRING
+     * 2 bytes | ...
+     */
+    uint64_t vol_array_len;
+    /* Index of the currrent volume name */
+    uint32_t cur_vol_idx;
+
+    /* Number of CA names */
+    uint32_t cas_nr;
+    /* Number of volume entries */
+    uint32_t vol_nr;
+    /* Index of the CA names (Not NULL terminated) */
+    char **cas_names;
+    /* Index of the volume names (Not NULL terminated) */
+    struct vol_idx *vol_names;
+    /* Buffer that holds the (hexlified) CA name data */
+    char *cas_array;
+    /* Buffer that holds the volume name data */
+    char *vol_array;
 };
 
 struct mapperd {
