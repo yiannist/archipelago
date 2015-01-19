@@ -177,7 +177,6 @@ struct mapping {
     unsigned pad:2;
 };
 
-
 /* map flags */
 #define MF_MAP_READONLY		(1 << 0)
 #define MF_MAP_DELETED		(1 << 1)
@@ -436,4 +435,8 @@ struct mapping *get_mapnode(struct map *map, uint64_t objindex);
 void put_mapnode(struct mapping *mn);
 struct xseg_request *__object_delete(struct peer_req *pr, struct mapping *mn);
 void object_delete_cb(struct peer_req *pr, struct xseg_request *req);
+
+ssize_t get_object_name(char *object, uint32_t object_len, struct map *map,
+                        uint64_t idx)
+
 #endif                          /* end MAPPER_H */

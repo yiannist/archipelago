@@ -62,8 +62,8 @@ add_executable(archip-vlmcd ${VLMCD_SRC})
 target_link_libraries(archip-vlmcd xseg)
 
 set(MAPPERD_SRC mapperd/mapper.c peer.c util/hash.c mapperd/mapper-handling.c
-	mapperd/mapper-version0.c mapperd/mapper-version1.c
-    mapperd/mapper-version2.c)
+    mapperd/mapper-version0.c mapperd/mapper-version1.c
+    mapperd/mapper-version2.c mapperd/mapper-helpers.c)
 add_executable(archip-mapperd ${MAPPERD_SRC})
 target_link_libraries(archip-mapperd xseg st crypto)
 set_target_properties(archip-mapperd
