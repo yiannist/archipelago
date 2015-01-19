@@ -831,8 +831,8 @@ struct xseg_request *__copyup_object(struct peer_req *pr, struct mapping *mn)
     uint32_t newtargetlen;
     char new_target[MAX_OBJECT_LEN + 1];
     char *tmp = new_target;
-    char hexlified_epoch[HEXLIFIED_EPOCH];
-    char hexlified_index[HEXLIFIED_INDEX];
+    char hexlified_epoch[HEXLIFIED_EPOCH_LEN];
+    char hexlified_index[HEXLIFIED_INDEX_LEN];
     uint64_t be_epoch = __cpu_to_be64(map->epoch);
     uint64_t be_objectidx = __cpu_to_be64(mn->objectidx);
 
@@ -845,12 +845,12 @@ struct xseg_request *__copyup_object(struct peer_req *pr, struct mapping *mn)
     tmp += map->volumelen;
     strncpy(tmp, "_", 1);
     tmp += 1;
-    strncpy(tmp, hexlified_epoch, HEXLIFIED_EPOCH);
-    tmp += HEXLIFIED_EPOCH;
+    strncpy(tmp, hexlified_epoch, HEXLIFIED_EPOCH_LEN);
+    tmp += HEXLIFIED_EPOCH_LEN;
     strncpy(tmp, "_", 1);
     tmp += 1;
-    strncpy(tmp, hexlified_index, HEXLIFIED_INDEX);
-    tmp += HEXLIFIED_INDEX;
+    strncpy(tmp, hexlified_index, HEXLIFIED_INDEX_LEN);
+    tmp += HEXLIFIED_INDEX_LEN;
     *tmp = 0;
     newtargetlen = tmp - new_target;
     XSEGLOG2(&lc, D, "New target: %s (len: %d)", new_target, newtargetlen);

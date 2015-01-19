@@ -35,16 +35,16 @@ static uint32_t get_map_block_name(char *target, struct map *map,
     uint64_t be_block_id = __cpu_to_be64(block_id);
     uint64_t be_epoch = __cpu_to_be64(map->epoch);
     char buf_blockid[sizeof(be_block_id) * 2 + 1];
-    char buf_epoch[HEXLIFIED_EPOCH + 1];
+    char buf_epoch[HEXLIFIED_EPOCH_LEN + 1];
 
     hexlify((unsigned char *)&be_block_id, sizeof(be_block_id), buf_blockid);
     buf_blockid[2 * sizeof(block_id)] = 0;
 
     hexlify((unsigned char *)&be_epoch, sizeof(map->epoch), buf_epoch);
-    buf_epoch[HEXLIFIED_EPOCH] = 0;
+    buf_epoch[HEXLIFIED_EPOCH_LEN] = 0;
 
     sprintf(target, "%s_%s_%s", map->volume, buf_epoch, buf_blockid);
-    targetlen = map->volumelen + 1 + HEXLIFIED_EPOCH + 1 + (sizeof(be_block_id) * 2);
+    targetlen = map->volumelen + 1 + HEXLIFIED_EPOCH_LEN + 1 + (sizeof(be_block_id) * 2);
 
     return targetlen;
 }

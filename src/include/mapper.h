@@ -55,7 +55,7 @@ struct header_struct {
  *
  * volume-index-epoch
  */
-#define MAX_VOLUME_LEN (MAX_OBJECT_LEN - HEXLIFIED_INDEX - HEXLIFIED_EPOCH - 2)
+#define MAX_VOLUME_LEN (MAX_OBJECT_LEN - HEXLIFIED_INDEX_LEN - HEXLIFIED_EPOCH_LEN - 2)
 
 
 /* Some compile time checks */
@@ -133,8 +133,8 @@ struct map_ops {
 /* These values come straight from the size of mapping->objectidx and
  * map->epoch.
  */
-#define HEXLIFIED_EPOCH (sizeof(uint64_t) << 1)
-#define HEXLIFIED_INDEX (sizeof(uint64_t) << 1)
+#define HEXLIFIED_EPOCH_LEN (sizeof(uint64_t) << 1)
+#define HEXLIFIED_INDEX_LEN (sizeof(uint64_t) << 1)
 
 
 
