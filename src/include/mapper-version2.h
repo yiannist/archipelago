@@ -30,7 +30,7 @@ struct map;
 
 /* Required size in storage to store object information.
  *
- * byte for flags + map_node->objectlen + max object len in disk
+ * byte for flags + mapping->objectlen + max object len in disk
  */
 struct v2_object_on_disk {
     unsigned char flags;

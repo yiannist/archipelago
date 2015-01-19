@@ -24,7 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 /* version 0 functions */
 #define v0_chunked_read_size (512*1024)
 
-int read_object_v0(struct map_node *mn, unsigned char *buf)
+int read_object_v0(struct mapping *mn, unsigned char *buf)
 {
     hexlify(buf, SHA256_DIGEST_SIZE, mn->object);
     mn->object[HEXLIFIED_SHA256_DIGEST_SIZE] = 0;
@@ -38,7 +38,7 @@ int read_object_v0(struct map_node *mn, unsigned char *buf)
     return 0;
 }
 
-void object_to_map_v0(unsigned char *data, struct map_node *mn)
+void object_to_map_v0(unsigned char *data, struct mapping *mn)
 {
     unhexlify(mn->object, data);
     //if name == zero block, raize MF_OBJECT_ZERO
@@ -46,7 +46,7 @@ void object_to_map_v0(unsigned char *data, struct map_node *mn)
 
 struct xseg_request *prepare_write_object_v0(struct peer_req *pr,
                                              struct map *map,
-                                             struct map_node *mn)
+                                             struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
@@ -71,31 +71,31 @@ struct xseg_request *prepare_write_object_v0(struct peer_req *pr,
 int read_map_v0(struct map *m, unsigned char *data)
 {
     int r;
-    struct map_node *map_node;
+    struct mapping *mapping;
     uint64_t i;
     uint64_t pos = 0, limit;
     uint64_t max_read_obj = v0_chunked_read_size / v0_objectsize_in_map;
     char nulls[SHA256_DIGEST_SIZE];
     memset(nulls, 0, SHA256_DIGEST_SIZE);
 
-    map_node = realloc(m->objects,
-                       (m->nr_objs + max_read_obj) * sizeof(struct map_node));
-    if (!map_node) {
+    mapping = realloc(m->objects,
+                       (m->nr_objs + max_read_obj) * sizeof(struct mapping));
+    if (!mapping) {
         return -1;
     }
-    m->objects = map_node;
+    m->objects = mapping;
     limit = m->nr_objs + max_read_obj;
     for (i = m->nr_objs; i < limit; i++) {
         if (!memcmp(data + pos, nulls, v0_objectsize_in_map)) {
             break;
         }
-        map_node[i].objectidx = i;
-        map_node[i].map = m;
-        map_node[i].waiters = 0;
-        map_node[i].state = 0;
-        map_node[i].ref = 1;
-        map_node[i].cond = st_cond_new();       //FIXME err check;
-        read_object_v0(&map_node[i], data + pos);
+        mapping[i].objectidx = i;
+        mapping[i].map = m;
+        mapping[i].waiters = 0;
+        mapping[i].state = 0;
+        mapping[i].ref = 1;
+        mapping[i].cond = st_cond_new();       //FIXME err check;
+        read_object_v0(&mapping[i], data + pos);
         pos += v0_objectsize_in_map;
     }
     XSEGLOG2(&lc, D, "Found %llu objects", i);
@@ -118,7 +118,7 @@ struct xseg_request *__write_map_data_v0(struct peer_req *pr, struct map *map)
     struct xseg_request *req;
     char *data;
     uint64_t datalen, pos, i;
-    struct map_node *mn;
+    struct mapping *mn;
 
     datalen = v0_mapheader_size + map->nr_objs * v0_objectsize_in_map;
     req = get_request(pr, mapper->mbportno, map->volume, map->volumelen,

@@ -165,9 +165,9 @@ static int remove_map(struct mapperd *mapper, struct map *map)
     return r;
 }
 
-inline struct map_node *get_mapnode(struct map *map, uint64_t index)
+inline struct mapping *get_mapnode(struct map *map, uint64_t index)
 {
-    struct map_node *mn;
+    struct mapping *mn;
     if (index >= map->nr_objs) {
         //      XSEGLOG2(&lc, E, "Index out of range: %llu > %llu",
         //                      index, map->nr_objs);
@@ -183,7 +183,7 @@ inline struct map_node *get_mapnode(struct map *map, uint64_t index)
     return mn;
 }
 
-inline void put_mapnode(struct map_node *mn)
+inline void put_mapnode(struct mapping *mn)
 {
     mn->ref--;
     //XSEGLOG2(&lc, D, "mapnode %p: ref: %u", mn, mn->ref);
@@ -196,19 +196,19 @@ inline void put_mapnode(struct map_node *mn)
 int initialize_map_objects(struct map *map)
 {
     uint64_t i;
-    struct map_node *map_node = map->objects;
+    struct mapping *mapping = map->objects;
 
-    if (!map_node) {
+    if (!mapping) {
         return -1;
     }
 
     for (i = 0; i < map->nr_objs; i++) {
-        map_node[i].map = map;
-        map_node[i].objectidx = i;
-        map_node[i].waiters = 0;
-        map_node[i].state = 0;
-        map_node[i].ref = 1;
-        map_node[i].cond = st_cond_new();       //FIXME err check;
+        mapping[i].map = map;
+        mapping[i].objectidx = i;
+        mapping[i].waiters = 0;
+        mapping[i].state = 0;
+        mapping[i].ref = 1;
+        mapping[i].cond = st_cond_new();       //FIXME err check;
     }
     return 0;
 }
@@ -222,7 +222,7 @@ static inline void __get_map(struct map *map)
 
 static inline void put_map(struct map *map)
 {
-    struct map_node *mn;
+    struct mapping *mn;
     XSEGLOG2(&lc, D, "Putting map %lx %s. ref %u", map, map->volume, map->ref);
     map->ref--;
     if (!map->ref) {
@@ -314,7 +314,7 @@ static struct map *create_map(char *name, uint32_t namelen, uint32_t flags)
 static void wait_all_map_objects_ready(struct map *map)
 {
     uint64_t i;
-    struct map_node *mn;
+    struct mapping *mn;
 
     //TODO: maybe add counter on the map on how many objects are used, to
     //speed up the common case, where there are no used objects.
@@ -341,7 +341,7 @@ static void wait_all_map_objects_ready(struct map *map)
 
 
 struct r2o {
-    struct map_node *mn;
+    struct mapping *mn;
     uint64_t offset;
     uint64_t size;
 };
@@ -349,7 +349,7 @@ struct r2o {
 static int do_copyups(struct peer_req *pr, struct r2o *mns, int n)
 {
     struct mapper_io *mio = __get_mapper_io(pr);
-    struct map_node *mn;
+    struct mapping *mn;
     int i, j, can_wait = 0;
     mio->pending_reqs = 0;
     mio->cb = copyup_cb;
@@ -420,7 +420,7 @@ static int req2objs(struct peer_req *pr, struct map *map, int write)
         nr_objs * sizeof(struct xseg_reply_map_scatterlist);
     uint32_t idx, i;
     uint64_t rem_size, obj_index, obj_offset, obj_size;
-    struct map_node *mn;
+    struct mapping *mn;
     char buf[XSEG_MAX_TARGETLEN];
     struct xseg_reply_map *reply;
 
@@ -433,7 +433,7 @@ static int req2objs(struct peer_req *pr, struct map *map, int write)
         return -1;
     }
 
-    /* get map_nodes of request */
+    /* get mappings of request */
     struct r2o *mns = calloc(nr_objs, sizeof(struct r2o));
     if (!mns) {
         XSEGLOG2(&lc, E, "Cannot allocate mns");
@@ -640,7 +640,7 @@ static int do_snapshot(struct peer_req *pr, struct map *map)
     uint64_t i;
     struct peerd *peer = pr->peer;
     //struct mapper_io *mio = __get_mapper_io(pr);
-    struct map_node *mn;
+    struct mapping *mn;
     uint64_t nr_objs;
     struct map *snap_map;
     struct xseg_request_snapshot *xsnapshot;
@@ -700,7 +700,7 @@ static int do_snapshot(struct peer_req *pr, struct map *map)
 
     nr_objs = map->nr_objs;
 
-    //set all map_nodes read only;
+    //set all mappings read only;
     //TODO, maybe skip that check and add an epoch number on each object.
     //Then we can check if object is writable iff object epoch == map epoch
     wait_all_map_objects_ready(map);
@@ -740,6 +740,13 @@ static int do_snapshot(struct peer_req *pr, struct map *map)
          * devastating, since this is not the common case, and it can
          * only cause unneeded copy-on-write operations.
          */
+	/* With epoched mapfiles, we should probably restore things here.
+	 * We need to restore only in memory, since if we fail we have either:
+	 * a) written nothing
+	 * b) written partial mapping data on a new epoched file, which can be
+	 *    overwritten on the future or garbage collected, whatever comes
+	 *    first.
+	 * Maybe use a double object array ? */
         goto out_err;
     }
     //write snapshot map
@@ -780,7 +787,7 @@ static int do_destroy(struct peer_req *pr, struct map *map)
     uint64_t i, nr_objs;
     struct peerd *peer = pr->peer;
     struct mapper_io *mio = __get_mapper_io(pr);
-    struct map_node *mn;
+    struct mapping *mn;
     struct xseg_request *req;
     int r;
 
@@ -881,7 +888,7 @@ static int rename_map(struct peer_req *pr, struct map *map,
     uint64_t i;
     struct peerd *peer = pr->peer;
     struct mapper_io *mio = __get_mapper_io(pr);
-    struct map_node *mn;
+    struct mapping *mn;
     uint64_t nr_objs;
     struct map *new_map;
     struct xseg_request_rename *xrename;
@@ -1115,7 +1122,7 @@ static int do_clone(struct peer_req *pr, struct map *map)
     //struct mapperd *mapper = __get_mapperd(peer);
     char *target = xseg_get_target(peer->xseg, pr->req);
     struct map *clonemap;
-    struct map_node *map_nodes, *mn;
+    struct mapping *mappings, *mn;
     struct xseg_request_clone *xclone =
         (struct xseg_request_clone *) xseg_get_data(peer->xseg, pr->req);
 
@@ -1166,39 +1173,39 @@ static int do_clone(struct peer_req *pr, struct map *map)
     }
 
     clonemap->blocksize = MAPPER_DEFAULT_BLOCKSIZE;
-    //alloc and init map_nodes
+    //alloc and init mappings
     c = calc_map_obj(clonemap);
-    map_nodes = calloc(c, sizeof(struct map_node));
-    if (!map_nodes) {
+    mappings = calloc(c, sizeof(struct mapping));
+    if (!mappings) {
         goto out_close;
     }
-    clonemap->objects = map_nodes;
+    clonemap->objects = mappings;
     clonemap->nr_objs = c;
     for (i = 0; i < c; i++) {
         mn = get_mapnode(map, i);
         if (mn) {
-            strncpy(map_nodes[i].object, mn->object, mn->objectlen);
-            map_nodes[i].objectlen = mn->objectlen;
-            map_nodes[i].flags = 0;
+            strncpy(mappings[i].object, mn->object, mn->objectlen);
+            mappings[i].objectlen = mn->objectlen;
+            mappings[i].flags = 0;
             if (mn->flags & MF_OBJECT_ARCHIP) {
-                map_nodes[i].flags |= MF_OBJECT_ARCHIP;
+                mappings[i].flags |= MF_OBJECT_ARCHIP;
             }
             if (mn->flags & MF_OBJECT_ZERO) {
-                map_nodes[i].flags |= MF_OBJECT_ZERO;
+                mappings[i].flags |= MF_OBJECT_ZERO;
             }
             put_mapnode(mn);
         } else {
-            strncpy(map_nodes[i].object, zero_block, ZERO_BLOCK_LEN);
-            map_nodes[i].objectlen = ZERO_BLOCK_LEN;
-            map_nodes[i].flags = MF_OBJECT_ZERO;
+            strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
+            mappings[i].objectlen = ZERO_BLOCK_LEN;
+            mappings[i].flags = MF_OBJECT_ZERO;
         }
-        map_nodes[i].object[map_nodes[i].objectlen] = '\0';     //NULL terminate
-        map_nodes[i].state = 0;
-        map_nodes[i].objectidx = i;
-        map_nodes[i].map = clonemap;
-        map_nodes[i].ref = 1;
-        map_nodes[i].waiters = 0;
-        map_nodes[i].cond = st_cond_new();      //FIXME errcheck;
+        mappings[i].object[mappings[i].objectlen] = '\0';     //NULL terminate
+        mappings[i].state = 0;
+        mappings[i].objectidx = i;
+        mappings[i].map = clonemap;
+        mappings[i].ref = 1;
+        mappings[i].waiters = 0;
+        mappings[i].cond = st_cond_new();      //FIXME errcheck;
     }
 
     r = write_map(pr, clonemap);
@@ -1224,7 +1231,7 @@ static int truncate_map(struct peer_req *pr, struct map *map, uint64_t offset)
 {
     struct peerd *peer = pr->peer;
     struct mapper_io *mio = __get_mapper_io(pr);
-    struct map_node *mn;
+    struct mapping *mn;
     uint64_t nr_objs, old_nr_objs;
     int r;
 
@@ -1244,8 +1251,8 @@ static int truncate_map(struct peer_req *pr, struct map *map, uint64_t offset)
      * extend mapfile with zero blocks.
      */
     if (nr_objs > old_nr_objs) {
-        struct map_node *map_nodes = calloc(nr_objs, sizeof(struct map_node));
-        if (!map_nodes) {
+        struct mapping *mappings = calloc(nr_objs, sizeof(struct mapping));
+        if (!mappings) {
             XSEGLOG2(&lc, E, "Cannot allocate %llu nr_objs", nr_objs);
             goto out_unset;
         }
@@ -1253,44 +1260,44 @@ static int truncate_map(struct peer_req *pr, struct map *map, uint64_t offset)
         for (i = 0; i < old_nr_objs; i++) {
             mn = get_mapnode(map, i);
             if (mn) {
-                strncpy(map_nodes[i].object, mn->object, mn->objectlen);
-                map_nodes[i].objectlen = mn->objectlen;
-                map_nodes[i].flags = 0;
+                strncpy(mappings[i].object, mn->object, mn->objectlen);
+                mappings[i].objectlen = mn->objectlen;
+                mappings[i].flags = 0;
                 if (mn->flags & MF_OBJECT_ARCHIP) {
-                    map_nodes[i].flags |= MF_OBJECT_ARCHIP;
+                    mappings[i].flags |= MF_OBJECT_ARCHIP;
                 }
                 if (mn->flags & MF_OBJECT_ZERO) {
-                    map_nodes[i].flags |= MF_OBJECT_ZERO;
+                    mappings[i].flags |= MF_OBJECT_ZERO;
                 }
                 put_mapnode(mn);
             } else {
-                strncpy(map_nodes[i].object, zero_block, ZERO_BLOCK_LEN);
-                map_nodes[i].objectlen = ZERO_BLOCK_LEN;
-                map_nodes[i].flags = MF_OBJECT_ZERO;
+                strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
+                mappings[i].objectlen = ZERO_BLOCK_LEN;
+                mappings[i].flags = MF_OBJECT_ZERO;
             }
-            map_nodes[i].object[map_nodes[i].objectlen] = 0;
-            map_nodes[i].state = 0;
-            map_nodes[i].objectidx = i;
-            map_nodes[i].map = map;
-            map_nodes[i].ref = 1;
-            map_nodes[i].waiters = 0;
-            map_nodes[i].cond = st_cond_new();
+            mappings[i].object[mappings[i].objectlen] = 0;
+            mappings[i].state = 0;
+            mappings[i].objectidx = i;
+            mappings[i].map = map;
+            mappings[i].ref = 1;
+            mappings[i].waiters = 0;
+            mappings[i].cond = st_cond_new();
         }
 
         for (i = old_nr_objs; i < nr_objs; i++) {
-            strncpy(map_nodes[i].object, zero_block, ZERO_BLOCK_LEN);
-            map_nodes[i].objectlen = ZERO_BLOCK_LEN;
-            map_nodes[i].flags = MF_OBJECT_ZERO;
-            map_nodes[i].object[map_nodes[i].objectlen] = 0;
-            map_nodes[i].state = 0;
-            map_nodes[i].objectidx = i;
-            map_nodes[i].map = map;
-            map_nodes[i].ref = 1;
-            map_nodes[i].waiters = 0;
-            map_nodes[i].cond = st_cond_new();
+            strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
+            mappings[i].objectlen = ZERO_BLOCK_LEN;
+            mappings[i].flags = MF_OBJECT_ZERO;
+            mappings[i].object[mappings[i].objectlen] = 0;
+            mappings[i].state = 0;
+            mappings[i].objectidx = i;
+            mappings[i].map = map;
+            mappings[i].ref = 1;
+            mappings[i].waiters = 0;
+            mappings[i].cond = st_cond_new();
         }
         free(map->objects);
-        map->objects = map_nodes;
+        map->objects = mappings;
     }
     map->size = offset;
     map->nr_objs = nr_objs;
@@ -1524,29 +1531,29 @@ void *handle_clone(struct peer_req *pr)
 
         //populate_map with zero objects;
         uint64_t nr_objs = calc_map_obj(map);
-        struct map_node *map_nodes = calloc(nr_objs, sizeof(struct map_node));
-        if (!map_nodes) {
+        struct mapping *mappings = calloc(nr_objs, sizeof(struct mapping));
+        if (!mappings) {
             XSEGLOG2(&lc, E, "Cannot allocate %llu nr_objs", nr_objs);
             close_map(pr, map);
             put_map(map);
             r = -1;
             goto out;
         }
-        map->objects = map_nodes;
+        map->objects = mappings;
         map->nr_objs = nr_objs;
 
         uint64_t i;
         for (i = 0; i < nr_objs; i++) {
-            strncpy(map_nodes[i].object, zero_block, ZERO_BLOCK_LEN);
-            map_nodes[i].objectlen = ZERO_BLOCK_LEN;
-            map_nodes[i].object[map_nodes[i].objectlen] = 0;    //NULL terminate
-            map_nodes[i].flags = MF_OBJECT_ZERO;        //MF_OBJECT_ARCHIP;
-            map_nodes[i].state = 0;
-            map_nodes[i].objectidx = i;
-            map_nodes[i].map = map;
-            map_nodes[i].ref = 1;
-            map_nodes[i].waiters = 0;
-            map_nodes[i].cond = st_cond_new();  //FIXME errcheck;
+            strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
+            mappings[i].objectlen = ZERO_BLOCK_LEN;
+            mappings[i].object[mappings[i].objectlen] = 0;    //NULL terminate
+            mappings[i].flags = MF_OBJECT_ZERO;        //MF_OBJECT_ARCHIP;
+            mappings[i].state = 0;
+            mappings[i].objectidx = i;
+            mappings[i].map = map;
+            mappings[i].ref = 1;
+            mappings[i].waiters = 0;
+            mappings[i].cond = st_cond_new();  //FIXME errcheck;
         }
         r = write_map(pr, map);
         if (r < 0) {
@@ -1654,43 +1661,43 @@ void *handle_create(struct peer_req *pr)
         goto out;
     }
 
-    struct map_node *map_nodes = calloc(nr_objs, sizeof(struct map_node));
-    if (!map_nodes) {
+    struct mapping *mappings = calloc(nr_objs, sizeof(struct mapping));
+    if (!mappings) {
         XSEGLOG2(&lc, E, "Cannot allocate %llu nr_objs", nr_objs);
         close_map(pr, map);
         put_map(map);
         r = -1;
         goto out;
     }
-    map->objects = map_nodes;
+    map->objects = mappings;
     map->nr_objs = nr_objs;
 
     uint64_t i;
     for (i = 0; i < nr_objs; i++) {
-        map_nodes[i].objectlen = mapdata->segs[i].targetlen;
-        strncpy(map_nodes[i].object, mapdata->segs[i].target,
+        mappings[i].objectlen = mapdata->segs[i].targetlen;
+        strncpy(mappings[i].object, mapdata->segs[i].target,
                 mapdata->segs[i].targetlen);
-        map_nodes[i].object[mapdata->segs[i].targetlen] = 0;
-        XSEGLOG2(&lc, D, "%d: %s (%u)", i, map_nodes[i].object,
+        mappings[i].object[mapdata->segs[i].targetlen] = 0;
+        XSEGLOG2(&lc, D, "%d: %s (%u)", i, mappings[i].object,
                  mapdata->segs[i].targetlen);
-        map_nodes[i].state = 0;
-        map_nodes[i].flags = 0;
+        mappings[i].state = 0;
+        mappings[i].flags = 0;
         if (!(mapdata->segs[i].flags & XF_MAPFLAG_READONLY)) {
-            map_nodes[i].flags |= MF_OBJECT_WRITABLE;
+            mappings[i].flags |= MF_OBJECT_WRITABLE;
         }
-        if (!strncmp(map_nodes[i].object, zero_block, ZERO_BLOCK_LEN)) {
-            map_nodes[i].flags |= MF_OBJECT_ZERO;
+        if (!strncmp(mappings[i].object, zero_block, ZERO_BLOCK_LEN)) {
+            mappings[i].flags |= MF_OBJECT_ZERO;
             //assert READONLY
-            if (map_nodes[i].flags & MF_OBJECT_WRITABLE) {
+            if (mappings[i].flags & MF_OBJECT_WRITABLE) {
                 XSEGLOG2(&lc, W, "Zero objects must always be READONLY");
-                map_nodes[i].flags &= ~MF_OBJECT_WRITABLE;
+                mappings[i].flags &= ~MF_OBJECT_WRITABLE;
             }
         }
-        map_nodes[i].objectidx = i;
-        map_nodes[i].map = map;
-        map_nodes[i].ref = 1;
-        map_nodes[i].waiters = 0;
-        map_nodes[i].cond = st_cond_new();      //FIXME errcheck;
+        mappings[i].objectidx = i;
+        mappings[i].map = map;
+        mappings[i].ref = 1;
+        mappings[i].waiters = 0;
+        mappings[i].cond = st_cond_new();      //FIXME errcheck;
     }
 
 
@@ -2123,7 +2130,7 @@ void custom_peer_finalize(struct peerd *peer)
 }
 
 /*
-void print_obj(struct map_node *mn)
+void print_obj(struct mapping *mn)
 {
 	fprintf(stderr, "[%llu]object name: %s[%u] exists: %c\n",
 			(unsigned long long) mn->objectidx, mn->object,
@@ -2142,7 +2149,7 @@ void print_map(struct map *m)
 			(unsigned long long) nr_objs,
 			m->version);
 	uint64_t i;
-	struct map_node *mn;
+	struct mapping *mn;
 	if (nr_objs > 1000000) //FIXME to protect against invalid volume size
 		return;
 	for (i = 0; i < nr_objs; i++) {

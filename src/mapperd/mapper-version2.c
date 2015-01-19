@@ -147,7 +147,7 @@ static int split_to_chunks(struct map *map, uint64_t start, uint64_t nr,
 }
 
 
-static int read_object_v2(struct map_node *mn, unsigned char *buf)
+static int read_object_v2(struct mapping *mn, unsigned char *buf)
 {
     char c = buf[0];
     int len = 0;
@@ -177,7 +177,7 @@ static int read_object_v2(struct map_node *mn, unsigned char *buf)
 }
 
 /* Fill a buffer representing an object on disk from a given map node */
-static void object_to_map_v2(unsigned char *buf, struct map_node *mn)
+static void object_to_map_v2(unsigned char *buf, struct mapping *mn)
 {
     struct v2_object_on_disk *object;
 
@@ -210,7 +210,7 @@ static struct xseg_request *prepare_write_chunk(struct peer_req *pr,
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
     char *data;
-    struct map_node *mn;
+    struct mapping *mn;
 
     datalen = v2_chunksize;
 
@@ -255,7 +255,7 @@ static struct xseg_request *prepare_load_chunk(struct peer_req *pr,
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
     char *data;
-    struct map_node *mn;
+    struct mapping *mn;
     uint64_t size, offset;
     uint64_t offset_in_first_object;
 
@@ -302,7 +302,7 @@ struct xseg_request *prepare_write_objects_v2(struct peer_req *pr,
 
 static struct xseg_request *prepare_write_object_v2(struct peer_req *pr,
                                                     struct map *map,
-                                                    struct map_node *mn)
+                                                    struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
     char *data;
@@ -322,7 +322,7 @@ int read_map_objects_v2(struct map *map, unsigned char *data, uint64_t start,
                         uint64_t nr)
 {
     int r;
-    struct map_node *map_node;
+    struct mapping *mapping;
     uint64_t i;
     uint64_t pos = 0;
 
@@ -333,13 +333,13 @@ int read_map_objects_v2(struct map *map, unsigned char *data, uint64_t start,
     if (!map->objects) {
         XSEGLOG2(&lc, D, "Allocating %llu nr_objs for size %llu",
                  map->nr_objs, map->size);
-        map_node = calloc(map->nr_objs, sizeof(struct map_node));
-        if (!map_node) {
+        mapping = calloc(map->nr_objs, sizeof(struct mapping));
+        if (!mapping) {
             XSEGLOG2(&lc, E, "Cannot allocate mem for %llu objects",
                      map->nr_objs);
             return -1;
         }
-        map->objects = map_node;
+        map->objects = mapping;
         r = initialize_map_objects(map);
         if (r < 0) {
             XSEGLOG2(&lc, E, "Cannot initialize map objects for map %s",
@@ -348,10 +348,10 @@ int read_map_objects_v2(struct map *map, unsigned char *data, uint64_t start,
         }
     }
 
-    map_node = map->objects;
+    mapping = map->objects;
 
     for (i = start; i < nr; i++) {
-        r = read_object_v2(&map_node[i], data + pos);
+        r = read_object_v2(&mapping[i], data + pos);
         if (r < 0) {
             XSEGLOG2(&lc, E, "Map %s: Could not read object %llu",
                      map->volume, i);
@@ -625,7 +625,7 @@ static int __load_map_objects_v2(struct peer_req *pr, struct map *map,
         XSEGLOG2(&lc, D, "Reading chunk %s(%u) , start %llu, nr :%llu",
                  chunk[i].target, chunk[i].targetlen,
                  chunk[i].start, chunk[i].nr);
-        r = __set_node(mio, req, (struct map_node *) (buf));
+        r = __set_node(mio, req, (struct mapping *) (buf));
         XSEGLOG2(&lc, D, "Send buf: %p, offset from start: %d, "
                  "nr_objs: %d", buf, buf - obuf,
                  (buf - obuf) / v2_objectsize_in_map);

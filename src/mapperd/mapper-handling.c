@@ -52,7 +52,7 @@ char *null_terminate(char *target, uint32_t targetlen)
 }
 
 int __set_node(struct mapper_io *mio, struct xseg_request *req,
-               struct map_node *mn)
+               struct mapping *mn)
 {
     int r = 0;
     if (mn) {
@@ -97,9 +97,9 @@ int __set_node(struct mapper_io *mio, struct xseg_request *req,
     return r;
 }
 
-struct map_node *__get_node(struct mapper_io *mio, struct xseg_request *req)
+struct mapping *__get_node(struct mapper_io *mio, struct xseg_request *req)
 {
-    struct map_node *mn;
+    struct mapping *mn;
     int r =
         xhash_lookup(mio->copyups_nodes, (xhashidx) req, (xhashidx *) & mn);
     if (r < 0) {
@@ -755,7 +755,7 @@ int load_map(struct peer_req *pr, struct map *map)
 
 /*
 struct xseg_request * __snapshot_object(struct peer_req *pr,
-						struct map_node *mn)
+						struct mapping *mn)
 {
 	struct peerd *peer = pr->peer;
 	struct mapperd *mapper = __get_mapperd(peer);
@@ -816,7 +816,7 @@ out_err:
 }
 */
 
-struct xseg_request *__copyup_object(struct peer_req *pr, struct map_node *mn)
+struct xseg_request *__copyup_object(struct peer_req *pr, struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
@@ -898,8 +898,8 @@ struct xseg_request *__copyup_object(struct peer_req *pr, struct map_node *mn)
   copyup_zeroblock:
     XSEGLOG2(&lc, I, "Copying up of zero block is not needed."
              "Proceeding in writing the new object in map");
-    /* construct a tmp map_node for writing purposes */
-    struct map_node newmn = *mn;
+    /* construct a tmp mapping for writing purposes */
+    struct mapping newmn = *mn;
     newmn.flags = 0;
     newmn.flags |= MF_OBJECT_WRITABLE;
     newmn.flags |= MF_OBJECT_ARCHIP;
@@ -926,12 +926,12 @@ struct xseg_request *__copyup_object(struct peer_req *pr, struct map_node *mn)
 }
 
 static int __copyup_copy_cb(struct peer_req *pr, struct xseg_request *req,
-                            struct map_node *mn)
+                            struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
     struct map *map;
     struct xseg_request *xreq;
-    struct map_node newmn;
+    struct mapping newmn;
     char *target;
     int r;
     struct mapper_io *mio = __get_mapper_io(pr);
@@ -944,7 +944,7 @@ static int __copyup_copy_cb(struct peer_req *pr, struct xseg_request *req,
         return -1;
     }
 
-    /* construct a tmp map_node for writing purposes */
+    /* construct a tmp mapping for writing purposes */
     target = xseg_get_target(peer->xseg, req);
     newmn = *mn;
     newmn.flags = 0;
@@ -970,10 +970,10 @@ static int __copyup_copy_cb(struct peer_req *pr, struct xseg_request *req,
 }
 
 static int __copyup_write_cb(struct peer_req *pr, struct xseg_request *req,
-                             struct map_node *mn)
+                             struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
-    struct map_node tmp;
+    struct mapping tmp;
     char *data;
     struct map *map = mn->map;
 
@@ -1001,7 +1001,7 @@ void copyup_cb(struct peer_req *pr, struct xseg_request *req)
     struct mapperd *mapper = __get_mapperd(peer);
     (void) mapper;
     struct mapper_io *mio = __get_mapper_io(pr);
-    struct map_node *mn = __get_node(mio, req);
+    struct mapping *mn = __get_node(mio, req);
     if (!mn) {
         XSEGLOG2(&lc, E, "Cannot get map node");
         goto out_err;
@@ -1052,7 +1052,7 @@ void copyup_cb(struct peer_req *pr, struct xseg_request *req)
 }
 
 struct xseg_request *__object_write(struct peerd *peer, struct peer_req *pr,
-                                    struct map *map, struct map_node *mn)
+                                    struct map *map, struct mapping *mn)
 {
     int r;
     struct mapper_io *mio = __get_mapper_io(pr);
@@ -1094,12 +1094,12 @@ struct xseg_request *__object_write(struct peerd *peer, struct peer_req *pr,
 
 static int __object_delete_delete_cb(struct peer_req *pr,
                                      struct xseg_request *req,
-                                     struct map_node *mn)
+                                     struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
     struct map *map;
     struct xseg_request *xreq;
-    struct map_node newmn;
+    struct mapping newmn;
     int r;
     struct mapper_io *mio = __get_mapper_io(pr);
 
@@ -1111,7 +1111,7 @@ static int __object_delete_delete_cb(struct peer_req *pr,
         return -1;
     }
 
-    /* construct a tmp map_node for writing purposes */
+    /* construct a tmp mapping for writing purposes */
     newmn = *mn;
     newmn.flags |= MF_OBJECT_DELETED;
     xreq = __object_write(peer, pr, map, &newmn);
@@ -1131,10 +1131,10 @@ static int __object_delete_delete_cb(struct peer_req *pr,
 
 static int __object_delete_write_cb(struct peer_req *pr,
                                     struct xseg_request *req,
-                                    struct map_node *mn)
+                                    struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
-    struct map_node tmp;
+    struct mapping tmp;
     char *data;
 
     //assert mn->state & MF_OBJECT_WRITING
@@ -1149,7 +1149,7 @@ void object_delete_cb(struct peer_req *pr, struct xseg_request *req)
 {
     struct mapper_io *mio = __get_mapper_io(pr);
     struct peerd *peer = pr->peer;
-    struct map_node *mn = __get_node(mio, req);
+    struct mapping *mn = __get_node(mio, req);
     struct xseg_reply_hash *xreply;
 
     __set_node(mio, req, NULL);
@@ -1202,7 +1202,7 @@ void object_delete_cb(struct peer_req *pr, struct xseg_request *req)
 }
 
 
-struct xseg_request *__object_delete(struct peer_req *pr, struct map_node *mn)
+struct xseg_request *__object_delete(struct peer_req *pr, struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
@@ -1305,7 +1305,7 @@ void hash_cb(struct peer_req *pr, struct xseg_request *req)
 {
     struct mapper_io *mio = __get_mapper_io(pr);
     struct peerd *peer = pr->peer;
-    struct map_node *mn = __get_node(mio, req);
+    struct mapping *mn = __get_node(mio, req);
     struct xseg_reply_hash *xreply;
 
     XSEGLOG2(&lc, I, "Callback of req %p", req);
@@ -1358,7 +1358,7 @@ int __hash_map(struct peer_req *pr, struct map *map, struct map *hashed_map)
     struct mapperd *mapper = __get_mapperd(pr->peer);
     struct mapper_io *mio = __get_mapper_io(pr);
     uint64_t i;
-    struct map_node *mn, *hashed_mn;
+    struct mapping *mn, *hashed_mn;
     struct xseg_request *req;
     int r;
 

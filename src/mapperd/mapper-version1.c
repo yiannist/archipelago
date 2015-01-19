@@ -24,7 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /* v1 functions */
 
-int read_object_v1(struct map_node *mn, unsigned char *buf)
+int read_object_v1(struct mapping *mn, unsigned char *buf)
 {
     char c = buf[0];
     mn->flags = 0;
@@ -48,7 +48,7 @@ int read_object_v1(struct map_node *mn, unsigned char *buf)
     return 0;
 }
 
-void object_to_map_v1(unsigned char *buf, struct map_node *mn)
+void object_to_map_v1(unsigned char *buf, struct mapping *mn)
 {
     buf[0] = (mn->flags & MF_OBJECT_WRITABLE) ? 1 : 0;
     //assert !(mn->flags & MF_OBJECT_ARCHIP)
@@ -63,7 +63,7 @@ void object_to_map_v1(unsigned char *buf, struct map_node *mn)
 
 struct xseg_request *prepare_write_object_v1(struct peer_req *pr,
                                              struct map *map,
-                                             struct map_node *mn)
+                                             struct mapping *mn)
 {
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
@@ -89,25 +89,25 @@ struct xseg_request *prepare_write_object_v1(struct peer_req *pr,
 int read_map_v1(struct map *m, unsigned char *data)
 {
     int r;
-    struct map_node *map_node;
+    struct mapping *mapping;
     uint64_t i;
     uint64_t pos = 0;
     uint64_t nr_objs = m->nr_objs;
 
-    map_node = calloc(nr_objs, sizeof(struct map_node));
-    if (!map_node) {
+    mapping = calloc(nr_objs, sizeof(struct mapping));
+    if (!mapping) {
         return -1;
     }
-    m->objects = map_node;
+    m->objects = mapping;
 
     for (i = 0; i < nr_objs; i++) {
-        map_node[i].map = m;
-        map_node[i].objectidx = i;
-        map_node[i].waiters = 0;
-        map_node[i].ref = 1;
-        map_node[i].state = 0;
-        map_node[i].cond = st_cond_new();       //FIXME err check;
-        read_object_v1(&map_node[i], data + pos);
+        mapping[i].map = m;
+        mapping[i].objectidx = i;
+        mapping[i].waiters = 0;
+        mapping[i].ref = 1;
+        mapping[i].state = 0;
+        mapping[i].cond = st_cond_new();       //FIXME err check;
+        read_object_v1(&mapping[i], data + pos);
         pos += v1_objectsize_in_map;
     }
     return 0;
@@ -128,7 +128,7 @@ struct xseg_request *__write_map_data_v1(struct peer_req *pr, struct map *map)
     struct xseg_request *req;
     char *data;
     uint64_t i, pos;
-    struct map_node *mn;
+    struct mapping *mn;
 
     req = get_request(pr, mapper->mbportno, map->volume, map->volumelen,
                       map->nr_objs * v1_objectsize_in_map);
