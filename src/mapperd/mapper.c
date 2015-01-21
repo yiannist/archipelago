@@ -169,28 +169,29 @@ static int remove_cache(struct mapperd *mapper, struct map *map)
     return r;
 }
 
-inline struct mapping *get_mapnode(struct map *map, uint64_t index)
+inline struct mapping *get_mapping(struct map *map, uint64_t index)
 {
-    struct mapping *mn;
+    struct mapping *m;
     if (index >= map->nr_objs) {
         //      XSEGLOG2(&lc, E, "Index out of range: %llu > %llu",
         //                      index, map->nr_objs);
         return NULL;
     }
+
     if (!map->objects) {
         //      XSEGLOG2(&lc, E, "Map %s has no objects", map->volume);
         return NULL;
     }
-    mn = &map->objects[index];
-    mn->ref++;
-    //XSEGLOG2(&lc, D,  "mapnode %p: ref: %u", mn, mn->ref);
+    m = &map->objects[index];
+    m->ref++;
+    //XSEGLOG2(&lc, D,  "mapping %p: ref: %u", mn, mn->ref);
     return mn;
 }
 
-inline void put_mapnode(struct mapping *mn)
+inline void put_mapping(struct mapping *m)
 {
     mn->ref--;
-    //XSEGLOG2(&lc, D, "mapnode %p: ref: %u", mn, mn->ref);
+    //XSEGLOG2(&lc, D, "mapping %p: ref: %u", mn, mn->ref);
     if (!mn->ref) {
         //clean up mn
         st_cond_destroy(mn->cond);
@@ -241,16 +242,16 @@ static inline void put_map(struct map *map)
          */
         uint64_t i;
         for (i = 0; i < map->nr_objs; i++) {
-            mn = get_mapnode(map, i);
+            mn = get_mapping(map, i);
             if (mn) {
                 //make sure all pending operations on all objects are completed
                 if (mn->state & MF_OBJECT_NOT_READY) {
                     XSEGLOG2(&lc, E, "BUG: map node in use while freeing map");
-                    wait_on_mapnode(mn, mn->state & MF_OBJECT_NOT_READY);
+                    wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
                 }
 //                              mn->state |= MF_OBJECT_DESTROYED;
-                put_mapnode(mn);        //matching mn->ref = 1 on mn init
-                put_mapnode(mn);        //matching get_mapnode;
+                put_mapping(mn);        //matching mn->ref = 1 on mn init
+                put_mapping(mn);        //matching get_mapping;
                 //assert mn->ref == 0;
                 if (mn->ref) {
                     XSEGLOG2(&lc, E, "BUG: map node ref != 0 after final put");
@@ -360,15 +361,15 @@ static void wait_all_map_objects_ready(struct map *map)
     }
 
     for (i = 0; i < map->nr_objs; i++) {
-        mn = get_mapnode(map, i);
+        mn = get_mapping(map, i);
         if (mn) {
             //make sure all pending operations on all objects are completed
             if (mn->state & MF_OBJECT_NOT_READY) {
                 XSEGLOG2(&lc, E, "BUG: Map node %x of map %s, "
                          "idx: %llu is not ready", mn, map->volume, i);
-//                              wait_on_mapnode(mn, mn->state & MF_OBJECT_NOT_READY);
+//                              wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
             }
-            put_mapnode(mn);
+            put_mapping(mn);
         }
     }
 
@@ -413,7 +414,7 @@ static int do_copyups(struct peer_req *pr, struct r2o *mns, int n)
                     && mn->state != MF_OBJECT_WRITING) {
                     XSEGLOG2(&lc, E, "BUG: Map node has wrong state");
                 }
-                wait_on_mapnode(mn, mn->state & MF_OBJECT_NOT_READY);
+                wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
                 if (mn->state & MF_OBJECT_DELETED) {
                     mio->err = 1;
                     continue;
@@ -485,7 +486,7 @@ static int req2objs(struct peer_req *pr, struct map *map, int write)
     obj_size =
         (obj_offset + rem_size >
          map->blocksize) ? map->blocksize - obj_offset : rem_size;
-    mn = get_mapnode(map, obj_index);
+    mn = get_mapping(map, obj_index);
     if (!mn) {
         XSEGLOG2(&lc, E, "Cannot find obj_index %llu\n",
                  (unsigned long long) obj_index);
@@ -502,7 +503,7 @@ static int req2objs(struct peer_req *pr, struct map *map, int write)
         obj_offset = 0;
         obj_size = (rem_size > map->blocksize) ? map->blocksize : rem_size;
         rem_size -= obj_size;
-        mn = get_mapnode(map, obj_index);
+        mn = get_mapping(map, obj_index);
         if (!mn) {
             XSEGLOG2(&lc, E, "Cannot find obj_index %llu\n",
                      (unsigned long long) obj_index);
@@ -554,7 +555,7 @@ static int req2objs(struct peer_req *pr, struct map *map, int write)
     }
   out:
     for (i = 0; i < idx; i++) {
-        put_mapnode(mns[i].mn);
+        put_mapping(mns[i].mn);
     }
     free(mns);
     mio->cb = NULL;
@@ -741,7 +742,7 @@ static int do_snapshot(struct peer_req *pr, struct map *map)
     //Then we can check if object is writable iff object epoch == map epoch
     wait_all_map_objects_ready(map);
     for (i = 0; i < nr_objs; i++) {
-        mn = get_mapnode(map, i);
+        mn = get_mapping(map, i);
         if (!mn) {
             XSEGLOG2(&lc, E, "Could not get map node %llu for map %s",
                      i, map->volume);
@@ -760,11 +761,11 @@ static int do_snapshot(struct peer_req *pr, struct map *map)
         // simutaneously with snapshot operation.
         if (mn->state & MF_OBJECT_NOT_READY) {
             XSEGLOG2(&lc, E, "BUG: object not ready");
-            //              wait_on_mapnode(mn, mn->state & MF_OBJECT_NOT_READY);
+            //              wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
         }
 
         mn->flags &= ~MF_OBJECT_WRITABLE;
-        put_mapnode(mn);
+        put_mapping(mn);
     }
     //increase epoch
     map->epoch++;
@@ -851,7 +852,7 @@ static int do_destroy(struct peer_req *pr, struct map *map)
             wait_on_pr(pr, mio->pending_reqs >= peer->nr_ops);
         }
 
-        mn = get_mapnode(map, i);
+        mn = get_mapping(map, i);
         if (!mn) {
             XSEGLOG2(&lc, E, "Could not get map node %llu for map %s",
                      i, map->volume);
@@ -861,7 +862,7 @@ static int do_destroy(struct peer_req *pr, struct map *map)
 
         if (mn->state & MF_OBJECT_NOT_READY) {
             XSEGLOG2(&lc, E, "BUG: object not ready");
-            wait_on_mapnode(mn, mn->state & MF_OBJECT_NOT_READY);
+            wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
         }
 
         if (mn->flags & MF_OBJECT_ZERO
@@ -871,7 +872,7 @@ static int do_destroy(struct peer_req *pr, struct map *map)
             //only remove writable archipelago objects.
             //skip already deleted
             XSEGLOG2(&lc, D, "Skipping object %s", mn->object);
-            put_mapnode(mn);
+            put_mapping(mn);
             continue;
         }
         XSEGLOG2(&lc, D, "%s flags:\n  Writable: %s\n  Zero: %s\n"
@@ -883,11 +884,11 @@ static int do_destroy(struct peer_req *pr, struct map *map)
 
         req = __object_delete(pr, mn);
         if (!req) {
-            put_mapnode(mn);
+            put_mapping(mn);
             XSEGLOG2(&lc, E, "Error removing object %s", mn->object);
             mio->err = 1;
         }
-        //mapnode will be put by delete_object on completion
+        //mapping will be put by delete_object on completion
     }
 
     if (mio->pending_reqs > 0) {
@@ -1218,7 +1219,7 @@ static int do_clone(struct peer_req *pr, struct map *map)
     clonemap->objects = mappings;
     clonemap->nr_objs = c;
     for (i = 0; i < c; i++) {
-        mn = get_mapnode(map, i);
+        mn = get_mapping(map, i);
         if (mn) {
             strncpy(mappings[i].object, mn->object, mn->objectlen);
             mappings[i].objectlen = mn->objectlen;
@@ -1229,7 +1230,7 @@ static int do_clone(struct peer_req *pr, struct map *map)
             if (mn->flags & MF_OBJECT_ZERO) {
                 mappings[i].flags |= MF_OBJECT_ZERO;
             }
-            put_mapnode(mn);
+            put_mapping(mn);
         } else {
             strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
             mappings[i].objectlen = ZERO_BLOCK_LEN;
@@ -1294,7 +1295,7 @@ static int truncate_map(struct peer_req *pr, struct map *map, uint64_t offset)
         }
         uint64_t i;
         for (i = 0; i < old_nr_objs; i++) {
-            mn = get_mapnode(map, i);
+            mn = get_mapping(map, i);
             if (mn) {
                 strncpy(mappings[i].object, mn->object, mn->objectlen);
                 mappings[i].objectlen = mn->objectlen;
@@ -1305,7 +1306,7 @@ static int truncate_map(struct peer_req *pr, struct map *map, uint64_t offset)
                 if (mn->flags & MF_OBJECT_ZERO) {
                     mappings[i].flags |= MF_OBJECT_ZERO;
                 }
-                put_mapnode(mn);
+                put_mapping(mn);
             } else {
                 strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
                 mappings[i].objectlen = ZERO_BLOCK_LEN;

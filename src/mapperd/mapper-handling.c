@@ -728,7 +728,7 @@ void copyup_cb(struct peer_req *pr, struct xseg_request *req)
                  req_ctx->obj_idx);
 
         mio->pending_reqs--;
-        signal_mapnode(req_ctx->orig_mapping);
+        signal_mapping(req_ctx->orig_mapping);
         free(req_ctx);
         signal_pr(pr);
     } else if (req->op == X_COPY) {
@@ -750,7 +750,7 @@ out_err:
     XSEGLOG2(&lc, D, "Mio->pending_reqs: %u", mio->pending_reqs);
     mio->err = 1;
     if (req_ctx->orig_mapping) {
-        signal_mapnode(req_ctx->orig_mapping);
+        signal_mapping(req_ctx->orig_mapping);
     }
     free(req_ctx);
     signal_pr(pr);
@@ -906,7 +906,7 @@ void object_delete_cb(struct peer_req *pr, struct xseg_request *req)
     XSEGLOG2(&lc, I, "Deletion of object %llu of map %s completed.",
              req_ctx->obj_idx, req_ctx->map);
     mio->pending_reqs--;
-    signal_mapnode(req_ctx->orig_mapping);
+    signal_mapping(req_ctx->orig_mapping);
     signal_pr(pr);
 
   out:
@@ -917,7 +917,7 @@ void object_delete_cb(struct peer_req *pr, struct xseg_request *req)
     mio->pending_reqs--;
     XSEGLOG2(&lc, D, "Mio->pending_reqs: %u", mio->pending_reqs);
     mio->err = 1;
-    signal_mapnode(req_ctx->orig_mapping);
+    signal_mapping(req_ctx->orig_mapping);
     signal_pr(pr);
     goto out;
 }
@@ -1007,7 +1007,7 @@ void hash_cb(struct peer_req *pr, struct xseg_request *req)
     XSEGLOG2(&lc, I, "Callback of req %p", req);
 
     if (!mn) {
-        XSEGLOG2(&lc, E, "Cannot get mapnode");
+        XSEGLOG2(&lc, E, "Cannot get mapping");
         mio->err = 1;
         goto out_nonode;
     }
@@ -1039,7 +1039,7 @@ void hash_cb(struct peer_req *pr, struct xseg_request *req)
     mn->flags = 0;
 
   out:
-    put_mapnode(mn);
+    put_mapping(mn);
     __set_node(mio, req, NULL);
   out_nonode:
     put_request(pr, req);
@@ -1061,18 +1061,18 @@ int __hash_map(struct peer_req *pr, struct map *map, struct map *hashed_map)
     mio->priv = 0;
 
     for (i = 0; i < map->nr_objs; i++) {
-        mn = get_mapnode(map, i);
+        mn = get_mapping(map, i);
         if (!mn) {
-            XSEGLOG2(&lc, E, "Cannot get mapnode %llu of map %s ",
+            XSEGLOG2(&lc, E, "Cannot get mapping %llu of map %s ",
                      "(nr_objs: %llu)", i, map->volume, map->nr_objs);
             return -1;
         }
-        hashed_mn = get_mapnode(hashed_map, i);
+        hashed_mn = get_mapping(hashed_map, i);
         if (!hashed_mn) {
-            XSEGLOG2(&lc, E, "Cannot get mapnode %llu of map %s ",
+            XSEGLOG2(&lc, E, "Cannot get mapping %llu of map %s ",
                      "(nr_objs: %llu)", i, hashed_map->volume,
                      hashed_map->nr_objs);
-            put_mapnode(mn);
+            put_mapping(mn);
             return -1;
         }
         if (!(mn->flags & MF_OBJECT_ARCHIP)) {
@@ -1082,16 +1082,16 @@ int __hash_map(struct peer_req *pr, struct map *map, struct map *hashed_map)
             hashed_mn->object[hashed_mn->objectlen] = 0;
             hashed_mn->flags = mn->flags;
 
-            put_mapnode(mn);
-            put_mapnode(hashed_mn);
+            put_mapping(mn);
+            put_mapping(hashed_mn);
             continue;
         }
 
         req = get_request(pr, mapper->bportno, mn->object, mn->objectlen, 0);
         if (!req) {
             XSEGLOG2(&lc, E, "Cannot get request for map %s", map->volume);
-            put_mapnode(mn);
-            put_mapnode(hashed_mn);
+            put_mapping(mn);
+            put_mapping(hashed_mn);
             return -1;
         }
 
@@ -1102,8 +1102,8 @@ int __hash_map(struct peer_req *pr, struct map *map, struct map *hashed_map)
         if (r < 0) {
             XSEGLOG2(&lc, E, "Cannot set node");
             put_request(pr, req);
-            put_mapnode(mn);
-            put_mapnode(hashed_mn);
+            put_mapping(mn);
+            put_mapping(hashed_mn);
             return -1;
         }
 
@@ -1113,12 +1113,12 @@ int __hash_map(struct peer_req *pr, struct map *map, struct map *hashed_map)
                      req, pr, map->volume);
             put_request(pr, req);
             __set_node(mio, req, NULL);
-            put_mapnode(mn);
-            put_mapnode(hashed_mn);
+            put_mapping(mn);
+            put_mapping(hashed_mn);
             return -1;
         }
         mio->pending_reqs++;
-        put_mapnode(mn);
+        put_mapping(mn);
     }
 
     return 0;

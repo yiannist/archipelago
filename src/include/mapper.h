@@ -307,7 +307,7 @@ struct req_ctx {
 		st_cond_wait(__pr->cond);	\
 	} while (__condition__)
 
-#define wait_on_mapnode(__mn, __condition__)	\
+#define wait_on_mapping(__mn, __condition__)	\
 	do {					\
 		ta--;				\
 		__mn->waiters++;		\
@@ -391,7 +391,7 @@ struct req_ctx {
 	}while(0)
 
 
-#define signal_mapnode(__mn)			\
+#define signal_mapping(__mn)			\
 	do { 					\
 		if (__mn->waiters) {		\
 			ta += __mn->waiters;	\
@@ -458,8 +458,8 @@ int delete_map_data(struct peer_req *pr, struct map *map);
 int delete_map(struct peer_req *pr, struct map *map, int delete_data);
 int purge_map(struct peer_req *pr, struct map *map);
 int initialize_map_objects(struct map *map);
-struct mapping *get_mapnode(struct map *map, uint64_t objindex);
-void put_mapnode(struct mapping *mn);
+struct mapping *get_mapping(struct map *map, uint64_t objindex);
+void put_mapping(struct mapping *mn);
 struct xseg_request *object_delete(struct peer_req *pr, struct map *map,
                                    uint64_t obj_idx);
 void object_delete_cb(struct peer_req *pr, struct xseg_request *req);
