@@ -308,6 +308,17 @@ static struct map *create_map(char *name, uint32_t namelen, uint32_t flags)
     m->waiters = 0;
     m->cond = st_cond_new();    //FIXME err check;
 
+    m->hex_cas_size = 0;
+    m->hex_cas_array_len = 0;
+    m->vol_array_len = 0;
+    m->cur_vol_idx = 0;
+    m->cas_nr = 0;
+    m->vol_nr = 0;
+    m->cas_names = NULL;
+    m->vol_names = NULL;
+    m->cas_array = NULL;
+    m->vol_array = NULL;
+
     m->users = 0;
     m->waiters_users = 0;
     m->users_cond = st_cond_new();
