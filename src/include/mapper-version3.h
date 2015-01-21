@@ -25,20 +25,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 struct map;
 
-/* Maximum length of an object name in memory */
-#define v3_max_objectlen 123
-
 /* Required size in storage to store object information.
  *
  * byte for flags + mapping->objectlen + max object len in disk
  */
 struct v3_object_on_disk {
-    unsigned char flags;
-    uint32_t objectlen;
-    unsigned char object[v3_max_objectlen];
+    uint32_t epoch;
+    /* C does not specify a memory layout for bitfields. So in order to be
+     * portable, use a full uint64_t and bit operations on the logically
+     * reserved bits to accomplish the same results.
+     */
+    // nameidx:30 type: 1 ro: 1
+    uint32_t nameidx_type_ro;
 } __attribute__ ((packed));
 
-//This must be a power of 2. Currently set to 128.
+//This must be a power of 2. Currently set to 8 bytes.
 #define v3_objectsize_in_map (sizeof(struct v3_object_on_disk))
 
 /* Map header contains:
@@ -55,6 +56,7 @@ struct v3_header_struct {
     uint64_t size;
     uint32_t blocksize;
     uint32_t flags;
+    // TODO, maybe make this uint32_t
     uint64_t epoch;
 } __attribute__ ((packed));
 

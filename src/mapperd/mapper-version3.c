@@ -27,6 +27,134 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 /* Must be a power of 2, as the blocksize */
 #define v3_chunksize (512*1024)
 
+#define V3_OBJECT_TYPE_ARCHIP 1
+#define V3_OBJECT_TYPE_CAS 0
+#define V3_OBJECT_READONLY 1
+#define V3_OBJECT_WRITABLE 0
+
+#define V3_OBJECT_ZERO_EPOCH (UINT32_MAX)
+
+#define V3_META_HEADER_SIZE 512
+
+struct v3_meta_hdr {
+    /* size of each cas name (unhexlified) */
+    uint32_t cas_size;
+    /* total length in bytes of the cas_array */
+    uint64_t cas_array_len;
+    /* total length in bytes of the vol_array */
+    uint64_t vol_array_len;
+    /* Volume name index of the current volume */
+    uint32_t cur_vol_idx;
+} __attribute__ ((packed));
+
+static read_meta_header_v3(struct map * map, struct v3_meta_hdr *meta_hdr)
+{
+    map->cas_size = __be32_to_cpu(meta_hdr->cas_size) * 2;
+    map->cas_array_len = __be64_to_cpu(meta_hdr->cas_array_len) * 2;
+    map->vol_array_len = __be64_to_cpu(meta_hdr->vol_array_len);
+    map->cur_vol_idx= __be32_to_cpu(meta_hdr->cur_vol_idx);
+}
+
+static write_meta_header_v3(struct map *map, struct v3_meta_hdr *meta_hdr)
+{
+    meta_hdr->cas_size = __cpu_to_be32(map->cas_size/2);
+    meta_hdr->cas_array_len = __cpu_to_be64(map->cas_array_len/2);
+    meta_hdr->vol_array_len = __cpu_to_be64(map->vol_array_len);
+    meta_hdr->cur_vol_idx = __cpu_to_be32(map->cur_vol_idx);
+}
+
+struct v3_object {
+    uint32_t epoch;
+    unsigned name_idx:30;
+    unsigned type:1;
+    unsigned ro:1;
+};
+
+static struct v3_object v3_zero_object = {
+    V3_OBJECT_ZERO_EPOCH,
+    0,
+    V3_OBJECT_TYPE_CAS,
+    V3_OBJECT_READONLY
+};
+
+static int v3_mappings_equal(struct v3_object *o1, struct v3_object *o2)
+{
+    return o1->epoch == o2->epoch && o1->name_idx == o2->name_idx
+            && o1->type == o2->type && o1->ro == o2->ro;
+}
+
+static int is_zero_object(struct v3_object *o)
+{
+    return v3_mappings_equal(o, &v3_zero_object);
+}
+
+/* Convert fucntions from on disk big-endian representation, to the on memory
+ * bit-field based representation
+ */
+static void v3_object_to_disk(struct v3_object *o, struct v3_object_on_disk *od)
+{
+    uint64_t tmp;
+
+    tmp = o->name_idx;
+    tmp <<= 1;
+    if (o->type == V3_OBJECT_TYPE_ARCHIP) {
+        tmp |= V3_OBJECT_TYPE_ARCHIP;
+    }
+    tmp <<= 1;
+
+    if (o->ro == V3_OBJECT_READONLY) {
+        tmp |= V3_OBJECT_READONLY;
+    }
+
+    od->epoch = __cpu_to_be32(o->epoch);
+    od->nameidx_type_ro = __cpu_to_be32(tmp);
+}
+
+static void v3_object_from_disk(struct v3_object_on_disk *od, struct v3_object *o)
+{
+    uint64_t tmp;
+
+    o->epoch = __be32_to_cpu(od->epoch);
+    tmp = __be32_to_cpu(od->nameidx_type_ro);
+
+    if (tmp & V3_OBJECT_READONLY) {
+        o->ro = V3_OBJECT_READONLY;
+    } else {
+        o->ro = V3_OBJECT_WRITABLE;
+    }
+    tmp >>= 1;
+
+    if (tmp & V3_OBJECT_TYPE_ARCHIP) {
+        o->type = V3_OBJECT_TYPE_ARCHIP;
+    } else {
+        o->type = V3_OBJECT_TYPE_CAS;
+    }
+    tmp >>= 1;
+
+    o->name_idx = tmp;
+}
+
+
+static volname_from_disk(void *buf, struct vol_idx *vi, void *name)
+{
+    uint16_t *be_len;
+
+    be_len = buf;
+    vi->len = __be16_to_cpu(*be_len);
+    memcpy(name, buf + sizeof(uint16_t), vi->len);
+    vi->name = name;
+}
+
+static volname_to_disk(struct vol_idx *vi, void *buf)
+{
+    uint16_t *be_len;
+
+    be_len = buf;
+    *be_len = __cpu_to_be16(vi->len);
+    memcpy(buf + sizeof(uint16_t), vi->name, vi->len);
+}
+
+
 /* v3 functions */
 
 static uint32_t get_map_block_name(char *target, struct map *map,
@@ -45,7 +173,25 @@ static uint32_t get_map_block_name(char *target, struct map *map,
     buf_epoch[HEXLIFIED_EPOCH_LEN] = 0;
 
     sprintf(target, "%s_%s_%s", map->volume, buf_epoch, buf_blockid);
+    // Calculate length of the above string
     targetlen = map->volumelen + 1 + HEXLIFIED_EPOCH_LEN + 1 + (sizeof(be_block_id) * 2);
+
+    return targetlen;
+}
+
+// TODO add support for max meta object size
+static uint32_t get_map_meta_name(char *target, struct map *map)
+{
+    uint32_t targetlen;
+    uint64_t be_epoch = __cpu_to_be64(map->epoch);
+    char buf_epoch[HEXLIFIED_EPOCH_LEN + 1];
+
+    hexlify((unsigned char *)&be_epoch, sizeof(map->epoch), buf_epoch);
+    buf_epoch[HEXLIFIED_EPOCH_LEN] = 0;
+
+    sprintf(target, "%s_%s.meta", map->volume, buf_epoch);
+    // Calculate length of the above string
+    targetlen = map->volumelen + 1 + HEXLIFIED_EPOCH_LEN + 1 + 4;
 
     return targetlen;
 }
@@ -71,8 +217,8 @@ static uint32_t get_offset_in_chunk(struct map *map, uint64_t offset)
     uint32_t chunksize = get_chunk_size(map);
     /* since blocksize and chunksize are both power of two, the following is
      * equivalent to:
-     * offset_in_block = offset % map->blocksize;
-     * offset_in_chunk = offset % chunksize;
+     *   offset_in_block = offset % map->blocksize;
+     *   offset_in_chunk = offset % chunksize;
      */
     return offset % chunksize;
 }
@@ -154,58 +300,63 @@ static int split_to_chunks(struct map *map, uint64_t start, uint64_t nr,
 }
 
 
-static int read_object_v3(struct mapping *mn, unsigned char *buf)
+static int read_object_v3(struct mapping *m, unsigned char *buf)
 {
     char c = buf[0];
     int len = 0;
     uint32_t objectlen;
 
-    mn->flags = 0;
-    mn->flags |= MF_OBJECT_WRITABLE & c;
-    mn->flags |= MF_OBJECT_ARCHIP & c;
-    mn->flags |= MF_OBJECT_ZERO & c;
-    mn->flags |= MF_OBJECT_DELETED & c;
-    objectlen = *(typeof(objectlen) *) (buf + 1);
-    mn->objectlen = objectlen;
-    if (mn->objectlen > v3_max_objectlen) {
-        XSEGLOG2(&lc, D, "mn: %p, buf: %p, objectlen: %u", mn, buf,
-                 mn->objectlen);
-        XSEGLOG2(&lc, E, "Invalid object len %u", mn->objectlen);
-        return -1;
+    struct v3_object_on_disk *be_mapping;
+    struct v3_object mapping;
+
+    be_mapping = (struct v3_object_on_disk *)buf;
+    v3_object_from_disk(be_mapping, &mapping);
+
+    m->flags = 0;
+
+    if (is_zero_object(&mapping)) {
+        m->flags |= MF_OBJECT_ZERO;
+    } else {
+        if (mapping.ro != V3_OBJECT_READONLY) {
+            m->flags |= MF_OBJECT_WRITABLE;
+        }
+        if (mapping.type == V3_OBJECT_TYPE_ARCHIP) {
+            m->flags |= MF_OBJECT_ARCHIP;
+        }
+        m->vol_epoch = mapping.epoch;
+        m->name_idx = mapping.name_idx;
     }
-//      if (mn->flags & MF_OBJECT_ARCHIP){
-//              strcpy(mn->object, MAPPER_PREFIX);
-//              len += MAPPER_PREFIX_LEN;
-//      }
-    memcpy(mn->object + len, buf + sizeof(objectlen) + 1, mn->objectlen);
-    mn->object[mn->objectlen] = 0;
 
     return 0;
 }
 
 /* Fill a buffer representing an object on disk from a given map node */
-static void object_to_map_v3(unsigned char *buf, struct mapping *mn)
+static void object_to_map_v3(unsigned char *buf, struct mapping *m)
 {
-    struct v3_object_on_disk *object;
+    struct v3_object mapping;
+    struct v3_object_on_disk *be_mapping;
 
-    //_Static_assert(typeof(mn->objectlen), typeof(object->objectlen));
-    if (mn->objectlen > v3_max_objectlen) {
-        XSEGLOG2(&lc, E, "Invalid object len %u", mn->objectlen);
-        mn->objectlen = v3_max_objectlen;
+    if (m->flags & MF_OBJECT_ZERO) {
+        mapping = v3_zero_object;
+    } else {
+        if (m->flags & MF_OBJECT_WRITABLE) {
+            mapping.ro = V3_OBJECT_WRITABLE;
+        } else {
+            mapping.ro = V3_OBJECT_READONLY;
+        }
+
+        if (m->flags & MF_OBJECT_ARCHIP) {
+            mapping.type = V3_OBJECT_TYPE_ARCHIP;
+        } else {
+            mapping.type = V3_OBJECT_TYPE_CAS;
+        }
+
+        mapping.name_idx = m->name_idx;
+        mapping.epoch = m->vol_epoch;
     }
 
-    memset(buf, 0, v3_objectsize_in_map);
-    object = (struct v3_object_on_disk *) buf;
-
-    object->flags = 0;
-    object->flags |= mn->flags & MF_OBJECT_WRITABLE;
-    object->flags |= mn->flags & MF_OBJECT_ARCHIP;
-    object->flags |= mn->flags & MF_OBJECT_ZERO;
-    object->flags |= mn->flags & MF_OBJECT_DELETED;
-
-
-    object->objectlen = mn->objectlen;
-    memcpy(object->object, mn->object, object->objectlen);
+    be_mapping = (struct v3_object_on_disk *)buf;
+    v3_object_to_disk(&mapping, be_mapping);
 }
 
 static struct xseg_request *prepare_write_chunk(struct peer_req *pr,
@@ -309,18 +460,19 @@ struct xseg_request *prepare_write_objects_v3(struct peer_req *pr,
 
 static struct xseg_request *prepare_write_object_v3(struct peer_req *pr,
                                                     struct map *map,
-                                                    struct mapping *mn)
+                                                    uint64_t obj_idx,
+                                                    struct mapping *m)
 {
     struct peerd *peer = pr->peer;
     char *data;
     struct xseg_request *req;
 
-    req = prepare_write_objects_v3(pr, map, mn->objectidx, 1);
+    req = prepare_write_objects_v3(pr, map, obj_idx, 1);
     if (!req) {
         return NULL;
     }
     data = xseg_get_data(peer->xseg, req);
-    object_to_map_v3((unsigned char *) data, mn);
+    object_to_map_v3((unsigned char *)data, m);
     return req;
 }
 
@@ -404,7 +556,7 @@ static int __delete_map_data_v3(struct peer_req *pr, struct map *map)
     struct mapperd *mapper = __get_mapperd(peer);
     struct mapper_io *mio = __get_mapper_io(pr);
     struct xseg_request *req;
-    char target[v3_max_objectlen];
+    char target[XSEG_MAX_TARGETLEN + 1];
     uint32_t targetlen, blockid;
     uint64_t objects_in_block, obj;
 
@@ -437,12 +589,90 @@ static int __delete_map_data_v3(struct peer_req *pr, struct map *map)
     return -1;
 }
 
+static void delete_meta_v3_cb(struct peer_req *pr,
+                              struct xseg_request *req)
+{
+    struct mapper_io *mio = __get_mapper_io(pr);
+
+    if (req->state & XS_FAILED) {
+        mio->err = 1;
+        XSEGLOG2(&lc, E, "Request failed");
+    }
+
+    put_request(pr, req);
+    mio->pending_reqs--;
+    signal_pr(pr);
+    return;
+}
+
+static int __delete_meta_v3(struct peer_req *pr, struct map *map)
+{
+    int r;
+    char meta_object[XSEG_MAX_TARGETLEN];
+    uint32_t meta_object_len;
+    uint64_t size;
+    struct xseg_request *req;
+    struct peerd *peer = pr->peer;
+    struct mapperd *mapper = __get_mapperd(peer);
+    struct mapper_io *mio = __get_mapper_io(pr);
+
+    size = map->hex_cas_array_len/2 + map->vol_array_len;
+    meta_object_len = get_map_meta_name(meta_object, map);
+
+    req = get_request(pr, mapper->mbportno, meta_object, meta_object_len, 0);
+    if (!req) {
+        XSEGLOG2(&lc, E, "Cannot get request");
+        return -ENOSPC;
+    }
+
+    req->op = X_DELETE;
+    req->offset = 0;
+    req->size = size;
+
+    r = send_request(pr, req);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot send request");
+        put_request(pr, req);
+        return -1;
+    }
+
+    mio->pending_reqs++;
+
+    return 0;
+}
+
+static int delete_meta_v3(struct peer_req *pr, struct map *map)
+{
+    int r;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    mio->cb = delete_meta_v3_cb;
+
+    r = __delete_meta_v3(pr, map);
+    if (r < 0) {
+        mio->err = 1;
+    }
+
+    if (mio->pending_reqs > 0) {
+        wait_on_pr(pr, mio->pending_reqs > 0);
+    }
+
+    mio->priv = NULL;
+    mio->cb = NULL;
+
+    return (mio->err ? -1 : 0);
+}
+
 static int delete_map_data_v3(struct peer_req *pr, struct map *map)
 {
     int r;
     struct mapper_io *mio = __get_mapper_io(pr);
-    mio->cb = delete_map_data_v3_cb;
 
+    r = delete_meta_v3(pr, map);
+    if (r < 0) {
+        return r;
+    }
+
+    mio->cb = delete_map_data_v3_cb;
     r = __delete_map_data_v3(pr, map);
     if (r < 0) {
         mio->err = 1;
@@ -553,8 +783,122 @@ static int write_objects_v3(struct peer_req *pr, struct map *map,
     return (mio->err ? -1 : 0);
 }
 
+static void write_meta_v3_cb(struct peer_req *pr, struct xseg_request *req)
+{
+    struct mapper_io *mio = __get_mapper_io(pr);
+
+    if (req->state & XS_FAILED) {
+        mio->err = 1;
+        XSEGLOG2(&lc, E, "Request failed");
+        goto out;
+    }
+
+    if (req->serviced != req->size) {
+        mio->err = 1;
+        XSEGLOG2(&lc, E, "Serviced != size");
+        goto out;
+    }
+
+out:
+    put_request(pr, req);
+    mio->pending_reqs--;
+    signal_pr(pr);
+    return;
+}
+
+static int __write_meta_v3(struct peer_req *pr, struct map *map)
+{
+    int r;
+    struct peerd *peer = pr->peer;
+    struct mapperd *mapper = __get_mapperd(peer);
+    struct mapper_io *mio = __get_mapper_io(pr);
+    uint32_t i;
+    struct v3_meta_hdr *meta_hdr;
+    char meta_object[XSEG_MAX_TARGETLEN];
+    uint32_t meta_object_len;
+    void *meta_buf, *vol_buf, *cas_buf;
+    struct xseg_request *req;
+
+    uint32_t meta_size = V3_META_HEADER_SIZE + map->cas_array_len/2 +
+                                map->vol_array_len;
+
+    if (map->vol_array == NULL) {
+        return -EINVAL;
+    }
+
+    meta_object_len = get_map_meta_name(meta_object, map);
+    req = get_request(pr, mapper->mbportno, meta_object, meta_object_len,
+                      meta_size);
+    if (!req) {
+        XSEGLOG2(&lc, E, "Cannot get request");
+        return -ENOSPC;
+    }
+
+    req->op = X_WRITE;
+    req->offset = 0;
+    req->size = meta_size;
+
+    meta_buf = xseg_get_data(peer->xseg, req);
+
+    meta_hdr = meta_buf;
+    cas_buf = meta_buf + V3_META_HEADER_SIZE;
+    vol_buf = meta_buf + V3_META_HEADER_SIZE;
+
+    write_meta_header_v3(map, meta_hdr);
+
+    if (map->cas_array != NULL) {
+        for (i = 0; i < map->cas_nr; i++) {
+            unhexlify(map->cas_names[1], cas_buf + i * map->cas_size/2);
+        }
+        vol_buf += i * map->cas_size/2;
+    }
+
+    for (i = 0; i < map->vol_nr; i++) {
+        volname_to_disk(&map->vol_names[i], vol_buf);
+        vol_buf += sizeof(uint16_t) + map->vol_names[i].len;
+    }
+
+    r = send_request(pr, req);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot send request");
+        put_request(pr, req);
+        return -1;
+    }
+
+    mio->pending_reqs++;
+
+    return 0;
+}
+
+static int write_meta_v3(struct peer_req *pr, struct map *map)
+{
+    int r;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    mio->cb = write_meta_v3_cb;
+
+    r = __write_meta_v3(pr, map);
+    if (r < 0) {
+        mio->err = 1;
+    }
+
+    if (mio->pending_reqs > 0) {
+        wait_on_pr(pr, mio->pending_reqs > 0);
+    }
+
+    mio->priv = NULL;
+    mio->cb = NULL;
+
+    return (mio->err ? -1 : 0);
+}
+
+
 static int write_map_data_v3(struct peer_req *pr, struct map *map)
 {
+    int r;
+    r = write_meta_v3(pr, map);
+    if (r < 0) {
+        return r;
+    }
     return write_objects_v3(pr, map, 0, map->nr_objs);
 }
 
@@ -564,7 +908,18 @@ static void load_map_data_v3_cb(struct peer_req *pr, struct xseg_request *req)
     unsigned char *buf;
     struct mapper_io *mio = __get_mapper_io(pr);
     struct peerd *peer = pr->peer;
-    buf = (unsigned char *) __get_node(mio, req);
+    struct req_ctx *req_ctx = NULL;
+
+    req_ctx = get_req_ctx(mio, req);
+    if (!req_ctx) {
+        XSEGLOG2(&lc, E, "Cannot get request context");
+        mio->err = 1;
+        goto out;
+    }
+
+    remove_req_ctx(mio, req);
+
+    buf = req_ctx->buf;
 
     XSEGLOG2(&lc, I, "Callback of req %p, buf: %p", req, buf);
 
@@ -591,8 +946,8 @@ static void load_map_data_v3_cb(struct peer_req *pr, struct xseg_request *req)
     XSEGLOG2(&lc, D, "Memcpy %llu to %p from (%p)", req->serviced, buf, data);
     memcpy(buf, data, req->serviced);
 
-  out:
-    __set_node(mio, req, NULL);
+out:
+    free(req_ctx);
     put_request(pr, req);
     mio->pending_reqs--;
     signal_pr(pr);
@@ -610,6 +965,7 @@ static int __load_map_objects_v3(struct peer_req *pr, struct map *map,
     struct xseg_request *req;
     struct chunk *chunk;
     int nr_chunks, i;
+    struct req_ctx *req_ctx;
 
     unsigned char *obuf = buf;
 
@@ -632,18 +988,32 @@ static int __load_map_objects_v3(struct peer_req *pr, struct map *map,
         XSEGLOG2(&lc, D, "Reading chunk %s(%u) , start %llu, nr :%llu",
                  chunk[i].target, chunk[i].targetlen,
                  chunk[i].start, chunk[i].nr);
-        r = __set_node(mio, req, (struct mapping *) (buf));
+        req_ctx = calloc(1, sizeof(struct req_ctx));
+        if (!req_ctx) {
+            goto out_put;
+        }
+
+        req_ctx->buf = buf;
+
+        r = set_req_ctx(mio, req, req_ctx);
+        if (r < 0) {
+            XSEGLOG2(&lc, E, "Cannot set request ctx");
+            goto out_put;
+        }
+
         XSEGLOG2(&lc, D, "Send buf: %p, offset from start: %d, "
                  "nr_objs: %d", buf, buf - obuf,
                  (buf - obuf) / v3_objectsize_in_map);
+
         buf += chunk[i].nr * v3_objectsize_in_map;
         XSEGLOG2(&lc, D, "Next buf: %p, offset from start: %d, "
                  "nr_objs: %d", buf, buf - obuf,
                  (buf - obuf) / v3_objectsize_in_map);
+
         r = send_request(pr, req);
         if (r < 0) {
             XSEGLOG2(&lc, E, "Cannot send request");
-            goto out_put;
+            goto out_unset_ctx;
         }
         mio->pending_reqs++;
     }
@@ -651,11 +1021,14 @@ static int __load_map_objects_v3(struct peer_req *pr, struct map *map,
     free(chunk);
     return 0;
 
-  out_put:
+out_unset_ctx:
+    remove_req_ctx(mio, req);
+    free(req_ctx);
+out_put:
     put_request(pr, req);
-  out_free:
+out_free:
     free(chunk);
-  out_err:
+out_err:
     mio->err = 1;
     return -1;
 }
@@ -708,8 +1081,254 @@ static int load_map_objects_v3(struct peer_req *pr, struct map *map,
     return (mio->err ? -1 : 0);
 }
 
+static void load_meta_v3_cb(struct peer_req *pr, struct xseg_request *req)
+{
+    struct peerd *peer = pr->peer;
+    uint32_t i;
+    char *vol_buf;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    struct map *map = mio->priv;
+    char *data;
+
+    if (req->state & XS_FAILED) {
+        mio->err = 1;
+        XSEGLOG2(&lc, E, "Request failed");
+        goto out;
+    }
+
+    if (req->serviced != req->size) {
+        mio->err = 1;
+        XSEGLOG2(&lc, E, "Serviced != size");
+        goto out;
+    }
+
+    // assert req->serviced == map->array_size;
+
+    data = xseg_get_data(peer->xseg, req);
+
+    map->cas_names = NULL;
+    map->cas_array = NULL;
+    map->vol_names = NULL;
+    map->vol_array = NULL;
+
+    if (map->cas_array_len > 0) {
+        map->cas_names = calloc(map->cas_array_len/map->cas_size, sizeof(char *));
+        map->cas_array = calloc(1, map->cas_array_len);
+        if (!map->cas_names || !map->cas_array) {
+            goto out_err;
+        }
+
+        for (i = 0; i < map->cas_array_len/2; i+=map->cas_size/2) {
+            hexlify((unsigned char *)map->cas_array + i * map->cas_size,
+                    map->cas_size/2, (unsigned char *)data + i *  map->cas_size/2);
+            // build index
+            map->cas_names[i] = map->cas_array + i * map->cas_size;
+        }
+        map->cas_nr = i;
+    }
+
+    if (!(map->vol_array_len > 0)) {
+        goto out_err;
+    }
+
+    uint16_t len;
+    uint64_t processed = 0, c = 0, sum = 0;
+    char *vol_names = data + map->cas_array_len/2;
+
+    while (processed < map->vol_array_len) {
+        len = __be16_to_cpu(*(uint16_t *)(vol_names + processed));
+        c++;
+        sum += len;
+        processed += sizeof(uint16_t) + len;
+    }
+
+    map->vol_array = calloc(1, sum);
+    if (!map->vol_array) {
+        goto out_err;
+    }
+
+    map->vol_nr = c;
+    map->vol_names = calloc(c, sizeof(struct vol_idx));
+    if (!map->vol_names) {
+        goto out_err;
+    }
+
+    i = 0;
+    processed = 0;
+    sum = 0;
+    while (processed < map->vol_array_len) {
+        volname_from_disk(vol_names + processed, &map->vol_names[i], map->vol_array + sum);
+        // processed = i * sizeof(uint16_t) + sum;
+        processed += sizeof(uint16_t) + map->vol_names[i].len;
+        sum += map->vol_names[i].len;
+        i++;
+    }
+
+out:
+    put_request(pr, req);
+    mio->pending_reqs--;
+    signal_pr(pr);
+    return;
+
+out_err:
+    free(map->cas_names);
+    free(map->cas_array);
+    free(map->vol_names);
+    free(map->vol_array);
+    mio->err = 1;
+    goto out;
+}
+
+static int __load_meta_v3(struct peer_req *pr, struct map *map)
+{
+    int r;
+    char meta_object[XSEG_MAX_TARGETLEN];
+    uint32_t meta_object_len;
+    uint64_t size;
+    struct xseg_request *req;
+    struct peerd *peer = pr->peer;
+    struct mapperd *mapper = __get_mapperd(peer);
+    struct mapper_io *mio = __get_mapper_io(pr);
+
+    size = map->cas_array_len/2 + map->vol_array_len;
+    meta_object_len = get_map_meta_name(meta_object, map);
+
+    req = get_request(pr, mapper->mbportno, meta_object, meta_object_len, size);
+    if (!req) {
+        XSEGLOG2(&lc, E, "Cannot get request");
+        return -ENOSPC;
+    }
+
+    req->op = X_READ;
+    req->offset = V3_META_HEADER_SIZE;
+    req->size = size;
+
+    r = send_request(pr, req);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot send request");
+        put_request(pr, req);
+        return -1;
+    }
+    mio->pending_reqs++;
+
+    return 0;
+}
+
+static void load_meta_header_v3_cb(struct peer_req *pr, struct xseg_request *req)
+{
+    struct mapper_io *mio = __get_mapper_io(pr);
+    struct v3_meta_hdr *meta_hdr;
+    struct peerd *peer = pr->peer;
+    struct map *map = mio->priv;
+
+    if (req->state & XS_FAILED) {
+        mio->err = 1;
+        XSEGLOG2(&lc, E, "Request failed");
+        goto out;
+    }
+
+    if (req->serviced != req->size) {
+        mio->err = 1;
+        XSEGLOG2(&lc, E, "Serviced != size");
+        goto out;
+    }
+
+    meta_hdr = (struct v3_meta_hdr *)xseg_get_data(peer->xseg, req);
+    read_meta_header_v3(map, meta_hdr);
+
+out:
+    put_request(pr, req);
+    mio->pending_reqs--;
+    signal_pr(pr);
+    return;
+}
+
+static int __load_meta_header_v3(struct peer_req *pr, struct map *map)
+{
+    int r;
+    uint32_t i;
+    char meta_object[XSEG_MAX_TARGETLEN];
+    uint32_t meta_object_len;
+    struct peerd *peer = pr->peer;
+    struct mapperd *mapper = __get_mapperd(peer);
+    struct mapper_io *mio = __get_mapper_io(pr);
+    struct xseg_request *req;
+
+    meta_object_len = get_map_meta_name(meta_object, map);
+
+    req = get_request(pr, mapper->mbportno, meta_object, meta_object_len,
+                      V3_META_HEADER_SIZE);
+    if (!req) {
+        XSEGLOG2(&lc, E, "Cannot get request");
+        return -ENOSPC;
+    }
+
+    req->op = X_READ;
+    req->offset = 0;
+    req->size = V3_META_HEADER_SIZE;
+
+    r = send_request(pr, req);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot send request");
+        put_request(pr, req);
+        return -1;
+    }
+    mio->pending_reqs++;
+
+    return 0;
+}
+
+static int load_meta_v3(struct peer_req *pr, struct map *map)
+{
+    int r;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    mio->cb = load_meta_header_v3_cb;
+    mio->priv = map;
+
+    r = __load_meta_header_v3(pr, map);
+    if (r < 0) {
+        goto out_err;
+    }
+
+    if (mio->pending_reqs > 0) {
+        wait_on_pr(pr, mio->pending_reqs > 0);
+    }
+
+    if (mio->err) {
+        goto out;
+    }
+
+    mio->cb = load_meta_v3_cb;
+    r = __load_meta_v3(pr, map);
+    if (r < 0) {
+        goto out_err;
+    }
+
+    if (mio->pending_reqs > 0) {
+        wait_on_pr(pr, mio->pending_reqs > 0);
+    }
+
+out:
+    mio->priv = NULL;
+    mio->cb = NULL;
+
+    return (mio->err ? -1 : 0);
+
+out_err:
+    mio->err = 1;
+    if (mio->pending_reqs > 0) {
+        wait_on_pr(pr, mio->pending_reqs > 0);
+    }
+    goto out;
+}
+
 static int load_map_data_v3(struct peer_req *pr, struct map *map)
 {
+    int r;
+    r = load_meta_v3(pr, map);
+    if (r < 0) {
+        return r;
+    }
     return load_map_objects_v3(pr, map, 0, map->nr_objs);
 }
 
@@ -725,7 +1344,7 @@ struct map_ops v3_ops = {
 void write_map_header_v3(struct map *map, struct v3_header_struct *v3_hdr)
 {
     v3_hdr->signature = __cpu_to_be32(MAP_SIGNATURE);
-    v3_hdr->version = __cpu_to_be32(MAP_v3);
+    v3_hdr->version = __cpu_to_be32(MAP_V3);
     v3_hdr->size = __cpu_to_be64(map->size);
     v3_hdr->blocksize = __cpu_to_be32(map->blocksize);
     v3_hdr->flags = __cpu_to_be32(map->flags);
@@ -746,7 +1365,7 @@ int read_map_header_v3(struct map *map, struct v3_header_struct *v3_hdr)
     //FIXME check each flag seperately
     map->flags = __be32_to_cpu(v3_hdr->flags);
     map->epoch = __be64_to_cpu(v3_hdr->epoch);
-    map->epoch = __be64_to_cpu(v3_hdr->epoch);
+
     /* sanitize flags */
     //map->flags &= MF_MAP_SANITIZE;
     map->nr_objs = calc_map_obj(map);
