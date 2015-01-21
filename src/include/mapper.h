@@ -128,6 +128,7 @@ struct map_ops {
 #define MF_EXCLUSIVE 	(1 << 1)
 #define MF_FORCE 	(1 << 2)
 #define MF_ARCHIP	(1 << 3)
+#define MF_SERIALIZE (1 << 4)
 
 #define MAPPER_DEFAULT_BLOCKSIZE (1<<22)
 
@@ -237,6 +238,10 @@ struct map {
     uint64_t opened_count;
     struct map_ops *mops;
 
+    volatile uint32_t pending_io;
+    volatile uint32_t waiters_pending_io;
+    st_cond_t pending_io_cond;
+
     volatile uint32_t users;
     volatile uint32_t waiters_users;
     st_cond_t users_cond;
@@ -329,6 +334,15 @@ struct req_ctx {
 		st_cond_wait(__map->users_cond);	\
 	} while (__map->users)
 
+#define wait_all_pending_io(__map)	\
+	do {					\
+		ta--;				\
+		__map->waiters_pending_io++;		\
+		XSEGLOG2(&lc, D, "Waiting for objects ready on map %lx %s, waiters: %u, ta: %u",\
+				   __map, __map->volume, __map->waiters_pending_io, ta); \
+		st_cond_wait(__map->pending_io_cond);	\
+	} while (__map->pending_io)
+
 #define signal_pr(__pr)				\
 	do { 					\
 		if (!__get_mapper_io(pr)->active){\
@@ -363,6 +377,19 @@ struct req_ctx {
 			st_cond_broadcast(__map->users_cond);	\
 		}				\
 	}while(0)
+
+#define signal_all_pending_io_ready(__map)			\
+	do { 					\
+		/* assert __map->users == 0 */ \
+		if (__map->waiters_pending_io) {		\
+			ta += __map->waiters_pending_io;		\
+			XSEGLOG2(&lc, D, "Signaling pending io ready for map %lx %s, waiters: %u, \
+			ta: %u",  __map, __map->volume, __map->waiters_pending_io, ta); \
+			__map->waiters_pending_io = 0;	\
+			st_cond_broadcast(__map->pending_io_cond);\
+		}				\
+	}while(0)
+
 
 #define signal_mapnode(__mn)			\
 	do { 					\
