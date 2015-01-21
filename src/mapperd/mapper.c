@@ -274,6 +274,9 @@ static inline void put_map(struct map *map)
             free(map->vol_array);
         }
 
+        st_cond_destroy(map->pending_io_cond);
+        st_cond_destroy(map->users_cond);
+
         XSEGLOG2(&lc, I, "Freed map %s", map->volume);
         free(map);
     }
@@ -336,6 +339,10 @@ static struct map *create_map(char *name, uint32_t namelen, uint32_t flags)
     m->users = 0;
     m->waiters_users = 0;
     m->users_cond = st_cond_new();
+
+    m->pending_io= 0;
+    m->waiters_pending_io= 0;
+    m->pending_io_cond = st_cond_new();
 
     return m;
 }
@@ -1450,14 +1457,27 @@ static struct map *get_ready_map(struct peer_req *pr, char *name,
                                  uint32_t namelen, uint32_t flags)
 {
     struct map *map;
-    do {
-        map = get_map(pr, name, namelen, flags);
-        if (!map || !(map->state & MF_MAP_NOT_READY)) {
-            return map;
-        }
+
+    map = get_map(pr, name, namelen, flags);
+    while (map && map->state & MF_MAP_NOT_READY) {
         wait_on_map(map, (map->state & MF_MAP_NOT_READY));
         put_map(map);
-    } while (1);
+        map = get_map(pr, name, namelen, flags);
+    }
+
+    if (map == NULL) {
+        return map;
+    }
+
+    if (flags & MF_SERIALIZE) {
+        map->state |= MF_MAP_SERIALIZING;
+        if (map->pending_io) {
+            wait_all_pending_io(map);
+        }
+        map->state &= ~MF_MAP_SERIALIZING;
+    }
+
+    return map;
 }
 
 static int map_action(int (action) (struct peer_req * pr, struct map * map),
