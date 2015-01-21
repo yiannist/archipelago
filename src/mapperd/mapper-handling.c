@@ -686,70 +686,6 @@ int load_map(struct peer_req *pr, struct map *map)
     return -1;
 }
 
-
-/*
-struct xseg_request * __snapshot_object(struct peer_req *pr,
-						struct mapping *mn)
-{
-	struct peerd *peer = pr->peer;
-	struct mapperd *mapper = __get_mapperd(peer);
-	struct mapper_io *mio = __get_mapper_io(pr);
-	//struct map *map = mn->map;
-	void *dummy;
-	int r = -1;
-	xport p;
-
-	//assert mn->volume != zero_block
-	//assert mn->flags & MF_OBJECT_WRITABLE
-	struct xseg_request *req = xseg_get_request(peer->xseg, pr->portno,
-						mapper->bportno, X_ALLOC);
-	if (!req){
-		XSEGLOG2(&lc, E, "Cannot get request for object %s", mn->object);
-		goto out_err;
-	}
-	r = xseg_prep_request(peer->xseg, req, mn->objectlen,
-				sizeof(struct xseg_request_snapshot));
-	if (r < 0){
-		XSEGLOG2(&lc, E, "Cannot prepare request for object %s", mn->object);
-		goto out_put;
-	}
-
-	char *target = xseg_get_target(peer->xseg, req);
-	strncpy(target, mn->object, req->targetlen);
-
-	struct xseg_request_snapshot *xsnapshot = (struct xseg_request_snapshot *) xseg_get_data(peer->xseg, req);
-	xsnapshot->target[0] = 0;
-	xsnapshot->targetlen = 0;
-
-	req->offset = 0;
-	req->size = MAPPER_DEFAULT_BLOCKSIZE;
-	req->op = X_SNAPSHOT;
-	r = xseg_set_req_data(peer->xseg, req, pr);
-	if (r<0){
-		XSEGLOG2(&lc, E, "Cannot set request data for object %s", mn->object);
-		goto out_put;
-	}
-	p = xseg_submit(peer->xseg, req, pr->portno, X_ALLOC);
-	if (p == NoPort) {
-		XSEGLOG2(&lc, E, "Cannot submit for object %s", mn->object);
-		goto out_unset;
-	}
-	xseg_signal(peer->xseg, p);
-
-	mn->flags |= MF_OBJECT_SNAPSHOTTING;
-	XSEGLOG2(&lc, I, "Snapshotting up object %s", mn->object);
-	return req;
-
-out_unset:
-	xseg_get_req_data(peer->xseg, req, &dummy);
-out_put:
-	xseg_put_request(peer->xseg, req, pr->portno);
-out_err:
-	XSEGLOG2(&lc, E, "Snapshotting object %s failed", mn->object);
-	return NULL;
-}
-*/
-
 static int copyup_copy_cb(struct peer_req *pr, struct xseg_request *req,
                             struct req_ctx *req_ctx)
 {
@@ -1200,58 +1136,6 @@ struct xseg_request *__object_delete(struct peer_req *pr, struct mapping *mn)
     XSEGLOG2(&lc, I, "Object %s deletion failed", mn->object);
     return NULL;
 }
-
-#if 0
-struct xseg_request *__delete_map(struct peer_req *pr, struct map *map)
-{
-    void *dummy;
-    struct peerd *peer = pr->peer;
-    struct mapperd *mapper = __get_mapperd(peer);
-    struct mapper_io *mio = __get_mapper_io(pr);
-    struct xseg_request *req = xseg_get_request(peer->xseg, pr->portno,
-                                                mapper->mbportno, X_ALLOC);
-    XSEGLOG2(&lc, I, "Deleting map %s", map->volume);
-    map->flags |= MF_MAP_DELETED;
-    if (!req) {
-        XSEGLOG2(&lc, E, "Cannot get request for map %s", map->volume);
-        goto out_err;
-    }
-    int r = xseg_prep_request(peer->xseg, req, map->volumelen, 0);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot prep request for map %s", map->volume);
-        goto out_put;
-    }
-    char *target = xseg_get_target(peer->xseg, req);
-    strncpy(target, map->volume, req->targetlen);
-    req->op = X_DELETE;
-    req->size = req->datalen;
-    req->offset = 0;
-    r = xseg_set_req_data(peer->xseg, req, pr);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot set req data for map %s", map->volume);
-        goto out_put;
-    }
-    /* do not check return value. just make sure there is no node set */
-    xport p = xseg_submit(peer->xseg, req, pr->portno, X_ALLOC);
-    if (p == NoPort) {
-        XSEGLOG2(&lc, E, "Cannot submit request for map %s", map->volume);
-        goto out_unset;
-    }
-    r = xseg_signal(peer->xseg, p);
-    map->state |= MF_MAP_DELETING;
-    XSEGLOG2(&lc, I, "Map %s deletion pending", map->volume);
-    return req;
-
-  out_unset:
-    xseg_get_req_data(peer->xseg, req, &dummy);
-  out_put:
-    xseg_put_request(peer->xseg, req, pr->portno);
-  out_err:
-    map->flags &= ~MF_MAP_DELETED;
-    XSEGLOG2(&lc, E, "Map %s deletion failed", map->volume);
-    return NULL;
-}
-#endif
 
 void hash_cb(struct peer_req *pr, struct xseg_request *req)
 {
