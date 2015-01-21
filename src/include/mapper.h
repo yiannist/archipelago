@@ -168,17 +168,12 @@ typedef void (*cb_t) (struct peer_req * pr, struct xseg_request * req);
 struct mapping {
     uint32_t flags;
     volatile uint32_t state;
-    uint64_t objectidx;         /* FIXME this is probably not needed */
-    uint32_t objectlen;
-    char object[MAX_OBJECT_LEN + 1];    /* NULL terminated string */
-    struct map *map;
+    uint32_t vol_epoch;
+    uint32_t name_idx;
+
     volatile uint32_t ref;
     volatile uint32_t waiters;
     st_cond_t cond;
-
-    uint32_t vol_epoch;
-    unsigned name_idx:30;
-    unsigned pad:2;
 };
 
 /* map flags */
@@ -311,8 +306,8 @@ struct req_ctx {
 	do {					\
 		ta--;				\
 		__mn->waiters++;		\
-		XSEGLOG2(&lc, D, "Waiting on map node %lx %s, waiters: %u, \
-			ta: %u",  __mn, __mn->object, __mn->waiters, ta);  \
+		XSEGLOG2(&lc, D, "Waiting on map node %lx, waiters: %u, \
+			ta: %u",  __mn, __mn->waiters, ta);  \
 		st_cond_wait(__mn->cond);	\
 	} while (__condition__)
 
@@ -373,8 +368,8 @@ struct req_ctx {
 	do { 					\
 		if (__mn->waiters) {		\
 			ta += __mn->waiters;	\
-			XSEGLOG2(&lc, D, "Signaling map node %lx %s, waiters: \
-			%u, ta: %u",  __mn, __mn->object, __mn->waiters, ta); \
+			XSEGLOG2(&lc, D, "Signaling map node %lx, waiters: \
+			%u, ta: %u",  __mn, __mn->waiters, ta); \
 			__mn->waiters = 0;	\
 			st_cond_broadcast(__mn->cond);	\
 		}				\
