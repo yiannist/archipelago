@@ -261,6 +261,19 @@ static inline void put_map(struct map *map)
         if (map->objects) {
             free(map->objects);
         }
+        if (map->cas_names) {
+            free(map->cas_names);
+        }
+        if (map->vol_names) {
+            free(map->vol_names);
+        }
+        if (map->cas_array) {
+            free(map->cas_array);
+        }
+        if (map->vol_array) {
+            free(map->vol_array);
+        }
+
         XSEGLOG2(&lc, I, "Freed map %s", map->volume);
         free(map);
     }
