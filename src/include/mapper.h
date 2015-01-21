@@ -441,7 +441,8 @@ int initialize_map_objects(struct map *map);
 int hash_map(struct peer_req *pr, struct map *map, struct map *hashed_map);
 struct mapping *get_mapnode(struct map *map, uint64_t objindex);
 void put_mapnode(struct mapping *mn);
-struct xseg_request *__object_delete(struct peer_req *pr, struct mapping *mn);
+struct xseg_request *object_delete(struct peer_req *pr, struct map *map,
+                                   uint64_t obj_idx);
 void object_delete_cb(struct peer_req *pr, struct xseg_request *req);
 
 int set_req_ctx(struct mapper_io *mio, struct xseg_request *req,

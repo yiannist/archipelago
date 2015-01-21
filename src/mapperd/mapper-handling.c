@@ -939,143 +939,34 @@ out_err:
     return NULL;
 }
 
-struct xseg_request *__object_write(struct peerd *peer, struct peer_req *pr,
-                                    struct map *map, struct mapping *mn)
-{
-    int r;
-    struct mapper_io *mio = __get_mapper_io(pr);
-    struct xseg_request *req;
-
-    req = map->mops->prepare_write_object(pr, map, mn);
-    if (!req) {
-        XSEGLOG2(&lc, E, "Cannot prepare write object");
-        goto out_err;
-    }
-
-    r = __set_node(mio, req, mn);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot set map node for object %s", mn->object);
-        goto out_put;
-    }
-    r = send_request(pr, req);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot send request %p, pr: %p, map: %s",
-                 req, pr, map->volume);
-        goto out_unset_node;
-    }
-    XSEGLOG2(&lc, I, "Writing object %s \n\t"
-             "Map: %s [%llu]",
-             mn->object, map->volume, (unsigned long long) mn->objectidx);
-
-    return req;
-
-  out_unset_node:
-    __set_node(mio, req, NULL);
-  out_put:
-    put_request(pr, req);
-  out_err:
-    XSEGLOG2(&lc, E, "Object write for object %s failed. \n\t"
-             "(Map: %s [%llu]",
-             mn->object, map->volume, (unsigned long long) mn->objectidx);
-    return NULL;
-}
-
-static int __object_delete_delete_cb(struct peer_req *pr,
-                                     struct xseg_request *req,
-                                     struct mapping *mn)
-{
-    struct peerd *peer = pr->peer;
-    struct map *map;
-    struct xseg_request *xreq;
-    struct mapping newmn;
-    int r;
-    struct mapper_io *mio = __get_mapper_io(pr);
-
-    mn->state &= ~MF_OBJECT_DELETING;
-
-    map = mn->map;
-    if (!map) {
-        XSEGLOG2(&lc, E, "Object %s has no map back pointer", mn->object);
-        return -1;
-    }
-
-    /* construct a tmp mapping for writing purposes */
-    newmn = *mn;
-    newmn.flags |= MF_OBJECT_DELETED;
-    xreq = __object_write(peer, pr, map, &newmn);
-    if (!xreq) {
-        XSEGLOG2(&lc, E, "Object write returned error for object %s"
-                 "\n\t of map %s [%llu]",
-                 mn->object, map->volume, (unsigned long long) mn->objectidx);
-        return -1;
-    }
-    r = __set_node(mio, xreq, mn);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot set map node for object %s", mn->object);
-    }
-    mn->state |= MF_OBJECT_WRITING;
-    return 0;
-}
-
-static int __object_delete_write_cb(struct peer_req *pr,
-                                    struct xseg_request *req,
-                                    struct mapping *mn)
-{
-    struct peerd *peer = pr->peer;
-    struct mapping tmp;
-    char *data;
-
-    //assert mn->state & MF_OBJECT_WRITING
-    mn->state &= ~MF_OBJECT_WRITING;
-
-    /* update object on cache */
-    mn->flags |= MF_OBJECT_DELETED;
-    return 0;
-}
-
 void object_delete_cb(struct peer_req *pr, struct xseg_request *req)
 {
     struct mapper_io *mio = __get_mapper_io(pr);
     struct peerd *peer = pr->peer;
-    struct mapping *mn = __get_node(mio, req);
-    struct xseg_reply_hash *xreply;
+    struct req_ctx *req_ctx;
 
-    __set_node(mio, req, NULL);
-
-    if (!mn) {
-        XSEGLOG2(&lc, E, "Cannot get mapnode");
+    req_ctx = get_req_ctx(mio, req);
+    if (!req_ctx) {
+        XSEGLOG2(&lc, E, "Cannot get request context");
         mio->err = 1;
         goto out_err;
     }
 
+    remove_req_ctx(mio, req);
+
+    req_ctx->orig_mapping->state &= ~MF_OBJECT_DELETING;
+
     if (req->state & XS_FAILED) {
         XSEGLOG2(&lc, E, "Req failed");
-        mn->state &= ~MF_OBJECT_DELETING;
-        mn->state &= ~MF_OBJECT_WRITING;
         goto out_err;
     }
-    if (req->op == X_WRITE) {
-        if (__object_delete_write_cb(pr, req, mn) < 0) {
-            goto out_err;
-        }
-        XSEGLOG2(&lc, I, "Object write of %s completed successfully",
-                 mn->object);
-        mio->pending_reqs--;
-        signal_mapnode(mn);
-        //put mapnode here to match get on do_destroy()
-        put_mapnode(mn);
-        signal_pr(pr);
-    } else if (req->op == X_DELETE) {
-        //      issue write_object;
-        if (__object_delete_delete_cb(pr, req, mn) < 0) {
-            goto out_err;
-        }
-        XSEGLOG2(&lc, I, "Object deletion of %s completed. "
-                 "Pending writing.", mn->object);
-    } else {
-        //FIXME   wtf??
-        ;
-    }
+
+    req_ctx->orig_mapping->flags |= MF_OBJECT_DELETED;
+    XSEGLOG2(&lc, I, "Deletion of object %llu of map %s completed.",
+             req_ctx->obj_idx, req_ctx->map);
+    mio->pending_reqs--;
+    signal_mapnode(req_ctx->orig_mapping);
+    signal_pr(pr);
 
   out:
     put_request(pr, req);
@@ -1085,55 +976,82 @@ void object_delete_cb(struct peer_req *pr, struct xseg_request *req)
     mio->pending_reqs--;
     XSEGLOG2(&lc, D, "Mio->pending_reqs: %u", mio->pending_reqs);
     mio->err = 1;
+    signal_mapnode(req_ctx->orig_mapping);
     signal_pr(pr);
     goto out;
 }
 
 
-struct xseg_request *__object_delete(struct peer_req *pr, struct mapping *mn)
+struct xseg_request *object_delete(struct peer_req *pr, struct map *map,
+                                   uint64_t obj_idx)
 {
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
     struct mapper_io *mio = __get_mapper_io(pr);
     struct xseg_request *req;
+    struct req_ctx *req_ctx;
+    uint32_t orig_target_len = MAX_OBJECT_LEN + 1;
+    char orig_target[MAX_OBJECT_LEN + 1];
     int r;
 
-    XSEGLOG2(&lc, I, "Deleting mapnode %s", mn->object);
+    if (obj_idx >= map->nr_objs) {
+        return NULL;
+    }
 
-    req = get_request(pr, mapper->bportno, mn->object, mn->objectlen, 0);
+    req_ctx = calloc(1, sizeof(struct req_ctx));
+    if (!req_ctx) {
+        return NULL;
+    }
+
+    req_ctx->obj_idx = obj_idx;
+    req_ctx->map = map;
+    req_ctx->orig_mapping = &map->objects[obj_idx];
+
+    r = calculate_object_name(orig_target, &orig_target_len, map,
+                              req_ctx->orig_mapping, obj_idx);
+    if (r < 0) {
+        goto out_err;
+    }
+
+    XSEGLOG2(&lc, I, "Deleting object %s", orig_target);
+
+    req = get_request(pr, mapper->bportno, orig_target, orig_target_len, 0);
     if (!req) {
-        XSEGLOG2(&lc, E, "Cannot get request for object %s", mn->object);
+        XSEGLOG2(&lc, E, "Cannot get request for object %llu", obj_idx);
         goto out_err;
     }
 
     req->op = X_DELETE;
-    req->size = req->datalen;
+    req->size = 0;
     req->offset = 0;
 
-    r = __set_node(mio, req, mn);
+    r = set_req_ctx(mio, req, req_ctx);
     if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot set map node for object %s", mn->object);
+        XSEGLOG2(&lc, E, "Cannot set request ctx");
         goto out_put;
     }
+
     r = send_request(pr, req);
     if (r < 0) {
         XSEGLOG2(&lc, E, "Cannot send request %p, pr: %p, object: %s",
-                 req, pr, mn->object);
-        goto out_unset_node;
+                 req, pr, orig_target);
+        goto out_unset_ctx;
     }
-    mn->flags |= MF_OBJECT_DELETING;
-    XSEGLOG2(&lc, I, "Object %s deletion pending", mn->object);
+
+    req_ctx->orig_mapping->flags |= MF_OBJECT_DELETING;
+    XSEGLOG2(&lc, I, "Object %s deletion pending", orig_target);
 
     mio->pending_reqs++;
 
     return req;
 
-  out_unset_node:
-    __set_node(mio, req, NULL);
-  out_put:
+out_unset_ctx:
+    remove_req_ctx(mio, req);
+out_put:
     put_request(pr, req);
-  out_err:
-    XSEGLOG2(&lc, I, "Object %s deletion failed", mn->object);
+out_err:
+    free(req_ctx);
+    XSEGLOG2(&lc, I, "Object %llu deletion failed", obj_idx);
     return NULL;
 }
 
