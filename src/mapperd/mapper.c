@@ -34,7 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "mapper.h"
 #include "mapper-versions.h"
 
-uint64_t cur_count = 0;
+uint64_t accepted_req_count = 0;
 
 extern st_cond_t req_cond;
 /* pithos considers this a block full of zeros, so should we.
@@ -762,7 +762,7 @@ static int do_snapshot(struct peer_req *pr, struct map *map)
 
     map->state &= ~MF_MAP_SNAPSHOTTING;
 
-    if (map->opened_count == cur_count) {
+    if (map->opened_count == mio->count) {
         close_map(pr, map);
     }
 
@@ -1897,8 +1897,8 @@ int dispatch_accepted(struct peerd *peer, struct peer_req *pr,
     //mio->state = ACCEPTED;
     mio->err = 0;
     mio->cb = NULL;
-    cur_count++;
-    mio->count = cur_count;
+    accepted_req_count++;
+    mio->count = accepted_req_count;
     switch (pr->req->op) {
         /* primary xseg operations of mapper */
     case X_CLONE:
