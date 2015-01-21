@@ -81,65 +81,6 @@ struct req_ctx * get_req_ctx(struct mapper_io *mio, struct xseg_request *req)
     return ret;
 }
 
-int __set_node(struct mapper_io *mio, struct xseg_request *req,
-               struct mapping *mn)
-{
-    int r = 0;
-    if (mn) {
-        XSEGLOG2(&lc, D, "Inserting (req: %lx, mapnode: %lx) on mio %lx",
-                 req, mn, mio);
-        r = xhash_insert(mio->copyups_nodes, (xhashidx) req, (xhashidx) mn);
-        if (r == -XHASH_ERESIZE) {
-            xhashidx shift = xhash_grow_size_shift(mio->copyups_nodes);
-            xhash_t *new_hashmap =
-                xhash_resize(mio->copyups_nodes, shift, 0, NULL);
-            if (!new_hashmap) {
-                return -1;
-            }
-            mio->copyups_nodes = new_hashmap;
-            r = xhash_insert(mio->copyups_nodes, (xhashidx) req,
-                             (xhashidx) mn);
-        }
-        if (r < 0) {
-            XSEGLOG2(&lc, E, "Insertion of (%lx, %lx) on mio %lx failed",
-                     req, mn, mio);
-        }
-    } else {
-        XSEGLOG2(&lc, D, "Deleting req: %lx from mio %lx", req, mio);
-        r = xhash_delete(mio->copyups_nodes, (xhashidx) req);
-        if (r == -XHASH_ERESIZE) {
-            xhashidx shift = xhash_shrink_size_shift(mio->copyups_nodes);
-            xhash_t *new_hashmap =
-                xhash_resize(mio->copyups_nodes, shift, 0, NULL);
-            if (!new_hashmap) {
-                return -1;
-            }
-            mio->copyups_nodes = new_hashmap;
-            r = xhash_delete(mio->copyups_nodes, (xhashidx) req);
-        } else if (r == -XHASH_ENOENT) {
-            XSEGLOG2(&lc, W, "%lx not found on mio %lx", req, mio);
-            return -1;
-        }
-        if (r < 0) {
-            XSEGLOG2(&lc, E, "Deletion of %lx on mio %lx failed", req, mio);
-        }
-    }
-    return r;
-}
-
-struct mapping *__get_node(struct mapper_io *mio, struct xseg_request *req)
-{
-    struct mapping *mn;
-    int r =
-        xhash_lookup(mio->copyups_nodes, (xhashidx) req, (xhashidx *) & mn);
-    if (r < 0) {
-        XSEGLOG2(&lc, W, "Cannot find req %lx on mio %lx", req, mio);
-        return NULL;
-    }
-    XSEGLOG2(&lc, D, "Found mapnode %lx req %lx on mio %lx", mn, req, mio);
-    return mn;
-}
-
 struct xseg_request *__close_map(struct peer_req *pr, struct map *map)
 {
     int r;
