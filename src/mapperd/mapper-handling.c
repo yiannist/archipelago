@@ -1055,6 +1055,7 @@ out_err:
     return NULL;
 }
 
+#if 0
 void hash_cb(struct peer_req *pr, struct xseg_request *req)
 {
     struct mapper_io *mio = __get_mapper_io(pr);
@@ -1213,3 +1214,4 @@ int hash_map(struct peer_req *pr, struct map *map, struct map *hashed_map)
         return 0;
     }
 }
+#endif

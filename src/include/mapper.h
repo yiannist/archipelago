@@ -438,7 +438,6 @@ int delete_map_data(struct peer_req *pr, struct map *map);
 int delete_map(struct peer_req *pr, struct map *map, int delete_data);
 int purge_map(struct peer_req *pr, struct map *map);
 int initialize_map_objects(struct map *map);
-int hash_map(struct peer_req *pr, struct map *map, struct map *hashed_map);
 struct mapping *get_mapnode(struct map *map, uint64_t objindex);
 void put_mapnode(struct mapping *mn);
 struct xseg_request *object_delete(struct peer_req *pr, struct map *map,
