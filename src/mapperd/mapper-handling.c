@@ -35,6 +35,51 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #define NO_V0SIZE ((uint64_t)-1)
 
+int set_req_ctx(struct mapper_io *mio, struct xseg_request *req,
+                struct req_ctx *rctx)
+{
+    XSEGLOG2(&lc, D, "Inserting ctx %lx of request %lx on mio %lx",
+                 rctx, req, mio);
+
+    g_hash_table_insert(mio->req_ctxs, req, rctx);
+
+    XSEGLOG2(&lc, D, "Inserted ctx %lx of request %lx on mio %lx",
+                 rctx, req, mio);
+    return 0;
+}
+
+int remove_req_ctx(struct mapper_io *mio, struct xseg_request *req)
+{
+    gboolean ret;
+
+    XSEGLOG2(&lc, D, "Removing ctx of request %lx from mio %lx", req, mio);
+
+    ret = g_hash_table_remove(mio->req_ctxs, req);
+    if (!ret) {
+        XSEGLOG2(&lc, E, "Deleting ctx of request %lx on mio %lx failed",
+                 req, mio);
+        return -ENOENT;
+    }
+
+    XSEGLOG2(&lc, D, "Removed ctx of request %lx from mio %lx", req, mio);
+
+    return 0;
+}
+
+struct req_ctx * get_req_ctx(struct mapper_io *mio, struct xseg_request *req)
+{
+    struct req_ctx *ret;
+
+    ret = g_hash_table_lookup(mio->req_ctxs, req);
+    if (ret == NULL) {
+        XSEGLOG2(&lc, W, "Cannot find ctx of req %lx on mio %lx", req, mio);
+        return NULL;
+    }
+
+    XSEGLOG2(&lc, D, "Found ctx %lx of req %lx on mio %lx", ret, req, mio);
+
+    return ret;
+}
 
 int __set_node(struct mapper_io *mio, struct xseg_request *req,
                struct mapping *mn)

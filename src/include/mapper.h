@@ -285,6 +285,15 @@ struct mapper_io {
     void *priv;
     volatile uint64_t pending_reqs;
     uint64_t count;
+    struct map *first_map;
+};
+
+struct req_ctx {
+    struct mapping *orig_mapping;
+    struct mapping copyup_mapping;
+    uint64_t obj_idx;
+    struct map *map;
+    char *buf;
 };
 
 /* usefull abstraction macros for context switching */
@@ -435,7 +444,8 @@ void put_mapnode(struct mapping *mn);
 struct xseg_request *__object_delete(struct peer_req *pr, struct mapping *mn);
 void object_delete_cb(struct peer_req *pr, struct xseg_request *req);
 
-ssize_t get_object_name(char *object, uint32_t object_len, struct map *map,
-                        uint64_t idx)
-
+int set_req_ctx(struct mapper_io *mio, struct xseg_request *req,
+                struct req_ctx *rctx);
+int remove_req_ctx(struct mapper_io *mio, struct xseg_request *req);
+struct req_ctx * get_req_ctx(struct mapper_io *mio, struct xseg_request *req);
 #endif                          /* end MAPPER_H */
