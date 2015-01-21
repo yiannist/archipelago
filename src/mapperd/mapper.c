@@ -81,7 +81,7 @@ static uint64_t calc_nr_obj(struct map *map, struct xseg_request *req)
  * Map cache handling functions
  */
 
-static struct map *find_map(struct mapperd *mapper, char *volume)
+static struct map *cache_lookup(struct mapperd *mapper, char *volume)
 {
     struct map *m = NULL;
     int r = xhash_lookup(mapper->hashmaps, (xhashidx) volume,
@@ -92,7 +92,7 @@ static struct map *find_map(struct mapperd *mapper, char *volume)
     return m;
 }
 
-static struct map *find_map_len(struct mapperd *mapper, char *target,
+static struct map *cache_lookup_len(struct mapperd *mapper, char *target,
                                 uint32_t targetlen, uint32_t flags)
 {
     char buf[XSEG_MAX_TARGETLEN + 1];
@@ -114,7 +114,7 @@ static struct map *find_map_len(struct mapperd *mapper, char *target,
 //      }
 
     XSEGLOG2(&lc, D, "looking up map %s, len %u", buf, targetlen);
-    return find_map(mapper, buf);
+    return cache_lookup(mapper, buf);
 }
 
 
@@ -122,7 +122,7 @@ static int insert_cache(struct mapperd *mapper, struct map *map)
 {
     int r = -1;
 
-    if (find_map(mapper, map->key)) {
+    if (cache_lookup(mapper, map->key)) {
         XSEGLOG2(&lc, W, "Map %s found in hash maps", map->key);
         goto out;
     }
@@ -146,7 +146,7 @@ static int insert_cache(struct mapperd *mapper, struct map *map)
     return r;
 }
 
-static int remove_map(struct mapperd *mapper, struct map *map)
+static int remove_cache(struct mapperd *mapper, struct map *map)
 {
     int r = -1;
 
@@ -637,7 +637,7 @@ static int dropcache(struct peer_req *pr, struct map *map)
      * the struct map.
      */
     //FIXME err check
-    r = remove_map(mapper, map);
+    r = remove_cache(mapper, map);
     if (r < 0) {
         XSEGLOG2(&lc, E, "Remove map %s from hashmap failed", map->volume);
         XSEGLOG2(&lc, E, "Dropping cache for map %s failed", map->volume);
@@ -1401,7 +1401,7 @@ struct map *get_map(struct peer_req *pr, char *name, uint32_t namelen,
     int r, archip_map = 0;
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
-    struct map *map = find_map_len(mapper, name, namelen, flags);
+    struct map *map = cache_lookup_len(mapper, name, namelen, flags);
     if (!map) {
         if (flags & MF_LOAD) {
             map = create_map(name, namelen, flags);
