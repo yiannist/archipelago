@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <mapper-version1.h>
 #include <mapper-version2.h>
 #include <mapper-version3.h>
+#include <glib.h>
 
 /* Alternative, each header file could define an appropriate MAP_V# */
 enum { MAP_V0, MAP_V1, MAP_V2, MAP_V3};
@@ -275,6 +276,8 @@ struct mapperd {
 };
 
 struct mapper_io {
+    GHashTable *req_ctxs;       /* Hash table to associate issued requests with their contextes */
+                                /* It is intended to replace copyup_nodes */
     xhash_t *copyups_nodes;     /* hash map (xseg_request) --> (corresponding mapping of copied up object) */
     volatile int err;           /* error flag */
     cb_t cb;
