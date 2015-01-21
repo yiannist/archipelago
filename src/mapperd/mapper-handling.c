@@ -750,239 +750,257 @@ out_err:
 }
 */
 
-struct xseg_request *__copyup_object(struct peer_req *pr, struct mapping *mn)
+static int copyup_copy_cb(struct peer_req *pr, struct xseg_request *req,
+                            struct req_ctx *req_ctx)
+{
+    int r;
+    struct peerd *peer = pr->peer;
+    struct map *map;
+    struct xseg_request *wreq;
+    struct mapper_io *mio = __get_mapper_io(pr);
+
+    req_ctx->orig_mapping->state &= ~MF_OBJECT_COPYING;
+
+    map = req_ctx->map;
+    //assert(map);
+    if (!map) {
+        return -1;
+    }
+
+    wreq = map->mops->prepare_write_object(pr, map, req_ctx->obj_idx, &req_ctx->copyup_mapping);
+    if (!wreq) {
+        XSEGLOG2(&lc, E,
+                "Cannot prepare write object request for object %llu of map %s",
+                (unsigned long long)req_ctx->obj_idx, map->volume);
+        return -EIO;
+    }
+
+    r = set_req_ctx(mio, wreq, req_ctx);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot set request ctx");
+        goto out_put;
+    }
+
+    r = send_request(pr, wreq);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot send request %p, pr: %p, map: %s",
+                 wreq, pr, map->volume);
+        goto out_unset_ctx;
+    }
+
+    XSEGLOG2(&lc, I, "Writing object %llu of map: %s",
+             (unsigned long long)req_ctx->obj_idx, map->volume);
+
+    req_ctx->orig_mapping->state |= MF_OBJECT_WRITING;
+
+    return 0;
+
+out_unset_ctx:
+    remove_req_ctx(mio, wreq);
+out_put:
+    put_request(pr, wreq);
+
+    return -1;
+}
+
+static int copyup_write_cb(struct peer_req *pr, struct xseg_request *req,
+                             struct req_ctx *req_ctx)
+{
+    //assert(req_ctx->orig_mapping)
+    //assert(req_ctx->orig_mapping->state & MF_OBJECT_WRITING)
+
+    // update mapping on cache
+    req_ctx->orig_mapping->flags = req_ctx->copyup_mapping.flags;
+    req_ctx->orig_mapping->vol_epoch = req_ctx->copyup_mapping.vol_epoch;
+    req_ctx->orig_mapping->name_idx = req_ctx->copyup_mapping.name_idx;
+
+    req_ctx->orig_mapping->state &= ~MF_OBJECT_WRITING;
+    return 0;
+}
+
+
+void copyup_cb(struct peer_req *pr, struct xseg_request *req)
+{
+    struct peerd *peer = pr->peer;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    struct req_ctx *req_ctx;
+    struct mapping *m;
+
+    req_ctx = get_req_ctx(mio, req);
+    if (!req_ctx) {
+        XSEGLOG2(&lc, E, "Cannot get request ctx");
+        goto out_err;
+    }
+
+    remove_req_ctx(mio, req);
+
+    m = req_ctx->orig_mapping;
+
+    if (req->state & XS_FAILED) {
+        XSEGLOG2(&lc, E, "Req failed");
+        m->state &= ~MF_OBJECT_COPYING;
+        m->state &= ~MF_OBJECT_WRITING;
+        goto out_err;
+    }
+
+    if (req->op == X_WRITE) {
+        if (copyup_write_cb(pr, req, req_ctx) < 0) {
+            goto out_err;
+        }
+        XSEGLOG2(&lc, I, "Object write of %llu completed successfully",
+                 req_ctx->obj_idx);
+
+        mio->pending_reqs--;
+        signal_mapnode(req_ctx->orig_mapping);
+        free(req_ctx);
+        signal_pr(pr);
+    } else if (req->op == X_COPY) {
+        if (copyup_copy_cb(pr, req, req_ctx) < 0) {
+            goto out_err;
+        }
+        XSEGLOG2(&lc, I, "Object copy up completed. Pending writing.");
+    } else {
+        //wtf??
+        ;
+    }
+
+out:
+    put_request(pr, req);
+    return;
+
+out_err:
+    mio->pending_reqs--;
+    XSEGLOG2(&lc, D, "Mio->pending_reqs: %u", mio->pending_reqs);
+    mio->err = 1;
+    if (req_ctx->orig_mapping) {
+        signal_mapnode(req_ctx->orig_mapping);
+    }
+    free(req_ctx);
+    signal_pr(pr);
+    goto out;
+}
+
+struct xseg_request *copyup_object(struct peer_req *pr, struct map *map,
+                                   uint64_t obj_idx)
 {
     struct peerd *peer = pr->peer;
     struct mapperd *mapper = __get_mapperd(peer);
     struct mapper_io *mio = __get_mapper_io(pr);
-    struct map *map = mn->map;
+    struct mapping copyup_mapping;
     struct xseg_request *req;
     struct xseg_request_copy *xcopy;
+    struct req_ctx *req_ctx;
+    uint32_t new_target_len = MAX_OBJECT_LEN + 1, orig_target_len = MAX_OBJECT_LEN + 1;
+    char new_target[MAX_OBJECT_LEN + 1], orig_target[MAX_OBJECT_LEN + 1];
     int r = -1;
 
-    //assert !(mn->flags & MF_OBJECT_WRITABLE)
 
-    uint32_t newtargetlen;
-    char new_target[MAX_OBJECT_LEN + 1];
-    char *tmp = new_target;
-    char hexlified_epoch[HEXLIFIED_EPOCH_LEN];
-    char hexlified_index[HEXLIFIED_INDEX_LEN];
-    uint64_t be_epoch = __cpu_to_be64(map->epoch);
-    uint64_t be_objectidx = __cpu_to_be64(mn->objectidx);
-
-//      strncpy(new_target, MAPPER_PREFIX, MAPPER_PREFIX_LEN);
-
-    hexlify((unsigned char *) &be_epoch, sizeof(be_epoch), hexlified_epoch);
-    hexlify((unsigned char *) &be_objectidx, sizeof(be_objectidx),
-            hexlified_index);
-    strncpy(tmp, map->volume, map->volumelen);
-    tmp += map->volumelen;
-    strncpy(tmp, "_", 1);
-    tmp += 1;
-    strncpy(tmp, hexlified_epoch, HEXLIFIED_EPOCH_LEN);
-    tmp += HEXLIFIED_EPOCH_LEN;
-    strncpy(tmp, "_", 1);
-    tmp += 1;
-    strncpy(tmp, hexlified_index, HEXLIFIED_INDEX_LEN);
-    tmp += HEXLIFIED_INDEX_LEN;
-    *tmp = 0;
-    newtargetlen = tmp - new_target;
-    XSEGLOG2(&lc, D, "New target: %s (len: %d)", new_target, newtargetlen);
-
-    if (!strncmp(mn->object, zero_block, ZERO_BLOCK_LEN)) {
-        goto copyup_zeroblock;
+    if (obj_idx >= map->nr_objs) {
+        return NULL;
     }
 
-    req = get_request(pr, mapper->bportno, new_target, newtargetlen,
-                      sizeof(struct xseg_request_copy));
+    req_ctx = calloc(1, sizeof(struct req_ctx));
+    if (!req_ctx) {
+        return NULL;
+    }
 
-    xcopy = (struct xseg_request_copy *) xseg_get_data(peer->xseg, req);
-    strncpy(xcopy->target, mn->object, mn->objectlen);
-    xcopy->targetlen = mn->objectlen;
+    req_ctx->obj_idx = obj_idx;
+    req_ctx->map = map;
+    req_ctx->orig_mapping = &map->objects[obj_idx];
+    req_ctx->copyup_mapping = map->objects[obj_idx];
 
-    req->offset = 0;
-    req->size = map->blocksize;
-    req->op = X_COPY;
-    r = __set_node(mio, req, mn);
+    //assert(!(req_ctx->orig_mapping->flags & MF_OBJECT_WRITABLE));
+
+    req_ctx->copyup_mapping.flags = MF_OBJECT_WRITABLE | MF_OBJECT_ARCHIP;
+    req_ctx->copyup_mapping.name_idx = map->cur_vol_idx;
+    req_ctx->copyup_mapping.vol_epoch = map->epoch;
+
+    r = calculate_object_name(new_target, &new_target_len, map,
+                              &req_ctx->copyup_mapping, obj_idx);
     if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot set map node for object %s", mn->object);
+        goto out_err;
+    }
+
+    XSEGLOG2(&lc, D, "New target: %s (len: %d)", new_target, new_target_len);
+
+    if (req_ctx->orig_mapping->flags & MF_OBJECT_ZERO) {
+        XSEGLOG2(&lc, I, "Copy up of zero block is not needed. "
+                         "Proceeding in writing the new object in map");
+
+        req = map->mops->prepare_write_object(pr, map, obj_idx, &req_ctx->copyup_mapping);
+        if (!req) {
+            XSEGLOG2(&lc, E,
+                    "Cannot prepare write object request for object %llu of map %s",
+                    (unsigned long long)req_ctx->obj_idx, map->volume);
+            goto out_err;
+        }
+
+        req_ctx->orig_mapping->state |= MF_OBJECT_WRITING;
+
+
+    } else {
+        r = calculate_object_name(orig_target, &orig_target_len, map,
+                req_ctx->orig_mapping, obj_idx);
+        if (r < 0) {
+            goto out_err;
+        }
+
+        req = get_request(pr, mapper->bportno, new_target, new_target_len,
+                sizeof(struct xseg_request_copy));
+
+        xcopy = (struct xseg_request_copy *)xseg_get_data(peer->xseg, req);
+        strncpy(xcopy->target, orig_target, orig_target_len);
+        xcopy->targetlen = orig_target_len;
+
+        req->offset = 0;
+        req->size = map->blocksize;
+        req->op = X_COPY;
+    }
+
+    r = set_req_ctx(mio, req, req_ctx);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot set request ctx");
         goto out_put;
     }
 
     r = send_request(pr, req);
     if (r < 0) {
         XSEGLOG2(&lc, E, "Cannot send request %p, pr: %p, map: %s",
-                 req, pr, map->volume);
-        goto out_unset_node;
-    }
-    mn->state |= MF_OBJECT_COPYING;
-    XSEGLOG2(&lc, I, "Copying up object %s \n\t to %s", mn->object,
-             new_target);
-    return req;
-
-  out_unset_node:
-    __set_node(mio, req, NULL);
-  out_put:
-    put_request(pr, req);
-//out_err:
-    XSEGLOG2(&lc, E, "Copying up object %s \n\t to %s failed", mn->object,
-             new_target);
-    return NULL;
-
-  copyup_zeroblock:
-    XSEGLOG2(&lc, I, "Copying up of zero block is not needed."
-             "Proceeding in writing the new object in map");
-    /* construct a tmp mapping for writing purposes */
-    struct mapping newmn = *mn;
-    newmn.flags = 0;
-    newmn.flags |= MF_OBJECT_WRITABLE;
-    newmn.flags |= MF_OBJECT_ARCHIP;
-    strncpy(newmn.object, new_target, newtargetlen);
-    newmn.object[newtargetlen] = 0;
-    newmn.objectlen = newtargetlen;
-    newmn.objectidx = mn->objectidx;
-    req = __object_write(peer, pr, map, &newmn);
-    if (!req) {
-        XSEGLOG2(&lc, E, "Object write returned error for object %s"
-                 "\n\t of map %s [%llu]",
-                 mn->object, map->volume, (unsigned long long) mn->objectidx);
-        __set_node(mio, req, NULL);
-        return NULL;
-    }
-    r = __set_node(mio, req, mn);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot set map node for object %s", mn->object);
-    }
-    mn->state |= MF_OBJECT_WRITING;
-    XSEGLOG2(&lc, I, "Object %s copy up completed. Pending writing.",
-             mn->object);
-    return req;
-}
-
-static int __copyup_copy_cb(struct peer_req *pr, struct xseg_request *req,
-                            struct mapping *mn)
-{
-    struct peerd *peer = pr->peer;
-    struct map *map;
-    struct xseg_request *xreq;
-    struct mapping newmn;
-    char *target;
-    int r;
-    struct mapper_io *mio = __get_mapper_io(pr);
-
-    mn->state &= ~MF_OBJECT_COPYING;
-
-    map = mn->map;
-    if (!map) {
-        XSEGLOG2(&lc, E, "Object %s has no map back pointer", mn->object);
-        return -1;
+                req, pr, map->volume);
+        goto out_unset_ctx;
     }
 
-    /* construct a tmp mapping for writing purposes */
-    target = xseg_get_target(peer->xseg, req);
-    newmn = *mn;
-    newmn.flags = 0;
-    newmn.flags |= MF_OBJECT_WRITABLE;
-    newmn.flags |= MF_OBJECT_ARCHIP;
-    strncpy(newmn.object, target, req->targetlen);
-    newmn.object[req->targetlen] = 0;
-    newmn.objectlen = req->targetlen;
-    newmn.objectidx = mn->objectidx;
-    xreq = __object_write(peer, pr, map, &newmn);
-    if (!xreq) {
-        XSEGLOG2(&lc, E, "Object write returned error for object %s"
-                 "\n\t of map %s [%llu]",
-                 mn->object, map->volume, (unsigned long long) mn->objectidx);
-        return -1;
-    }
-    r = __set_node(mio, xreq, mn);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot set map node for object %s", mn->object);
-    }
-    mn->state |= MF_OBJECT_WRITING;
-    return 0;
-}
-
-static int __copyup_write_cb(struct peer_req *pr, struct xseg_request *req,
-                             struct mapping *mn)
-{
-    struct peerd *peer = pr->peer;
-    struct mapping tmp;
-    char *data;
-    struct map *map = mn->map;
-
-    //assert mn->state & MF_OBJECT_WRITING
-    mn->state &= ~MF_OBJECT_WRITING;
-
-    data = xseg_get_data(peer->xseg, req);
-    map->mops->read_object(&tmp, (unsigned char *) data);
-    /* old object should not be writable */
-    if (mn->flags & MF_OBJECT_WRITABLE) {
-        XSEGLOG2(&lc, E, "map node %s has wrong flags", mn->object);
-        return -1;
-    }
-    /* update object on cache */
-    strncpy(mn->object, tmp.object, tmp.objectlen);
-    mn->object[tmp.objectlen] = 0;
-    mn->objectlen = tmp.objectlen;
-    mn->flags = tmp.flags;
-    return 0;
-}
-
-void copyup_cb(struct peer_req *pr, struct xseg_request *req)
-{
-    struct peerd *peer = pr->peer;
-    struct mapperd *mapper = __get_mapperd(peer);
-    (void) mapper;
-    struct mapper_io *mio = __get_mapper_io(pr);
-    struct mapping *mn = __get_node(mio, req);
-    if (!mn) {
-        XSEGLOG2(&lc, E, "Cannot get map node");
-        goto out_err;
-    }
-    __set_node(mio, req, NULL);
-
-    if (req->state & XS_FAILED) {
-        XSEGLOG2(&lc, E, "Req failed");
-        mn->state &= ~MF_OBJECT_COPYING;
-        mn->state &= ~MF_OBJECT_WRITING;
-        goto out_err;
-    }
-    if (req->op == X_WRITE) {
-        if (__copyup_write_cb(pr, req, mn) < 0) {
-            goto out_err;
-        }
-        XSEGLOG2(&lc, I, "Object write of %s completed successfully",
-                 mn->object);
-        mio->pending_reqs--;
-        signal_mapnode(mn);
-        signal_pr(pr);
-    } else if (req->op == X_COPY) {
-        //      issue write_object;
-        if (__copyup_copy_cb(pr, req, mn) < 0) {
-            goto out_err;
-        }
-        XSEGLOG2(&lc, I, "Object %s copy up completed. "
-                 "Pending writing.", mn->object);
+    if (req_ctx->orig_mapping->flags & MF_OBJECT_ZERO) {
+        req_ctx->orig_mapping->state |= MF_OBJECT_WRITING;
+        XSEGLOG2(&lc, I, "Object %s copy up completed. Pending writing.",
+                orig_target);
     } else {
-        //wtf??
-        ;
+        req_ctx->orig_mapping->state |= MF_OBJECT_COPYING;
+        XSEGLOG2(&lc, I, "Copying up object %s to %s", orig_target,
+                new_target);
     }
 
-  out:
+    return req;
+
+
+out_unset_ctx:
+    remove_req_ctx(mio, req);
+out_put:
     put_request(pr, req);
-    return;
-
-  out_err:
-    mio->pending_reqs--;
-    XSEGLOG2(&lc, D, "Mio->pending_reqs: %u", mio->pending_reqs);
-    mio->err = 1;
-    if (mn) {
-        signal_mapnode(mn);
+out_err:
+    if (req_ctx->orig_mapping->flags & MF_OBJECT_ZERO) {
+        XSEGLOG2(&lc, E, "Copying up zero object to %s failed", new_target);
+    } else {
+        XSEGLOG2(&lc, E, "Copying up object %s to %s failed",
+                orig_target, new_target);
     }
-    signal_pr(pr);
-    goto out;
 
+    req_ctx->orig_mapping->state &= ~MF_OBJECT_COPYING;
+    req_ctx->orig_mapping->state &= ~MF_OBJECT_WRITING;
+
+    free(req_ctx);
+
+    return NULL;
 }
 
 struct xseg_request *__object_write(struct peerd *peer, struct peer_req *pr,
