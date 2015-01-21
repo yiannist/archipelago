@@ -31,4 +31,10 @@ struct xseg_request *get_request(struct peer_req *pr, xport dst, char *target,
                                  uint32_t targetlen, uint64_t datalen);
 void put_request(struct peer_req *pr, struct xseg_request *req);
 
+
+int calculate_object_name(char *object, uint32_t *object_len, struct map *map,
+                          struct mapping *m, uint64_t obj_idx);
+
+int get_object_name(char *object, uint32_t *object_len, struct map *map,
+                    uint64_t idx);
 #endif /* end of include guard */
