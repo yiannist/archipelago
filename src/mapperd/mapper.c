@@ -55,22 +55,26 @@ void custom_peer_usage()
  * Helper functions
  */
 
-static uint32_t calc_nr_obj(struct map *map, struct xseg_request *req)
+static uint64_t calc_nr_obj(struct map *map, struct xseg_request *req)
 {
-    unsigned int r = 1;
-    uint64_t rem_size = req->size;
-    uint64_t obj_offset = req->offset & (map->blocksize - 1);   //modulo
-    uint64_t obj_size =
-        (rem_size + obj_offset >
-         map->blocksize) ? map->blocksize - obj_offset : rem_size;
+    uint64_t nr_objs = 1;
+    uint64_t rem_size, obj_offset, obj_size;
+
+    rem_size = req->size;
+    obj_offset = req->offset & (map->blocksize - 1);   //modulo
+    if (rem_size + obj_offset > map->blocksize) {
+        obj_size = map->blocksize - obj_offset;
+    } else {
+        obj_size = rem_size;
+    }
     rem_size -= obj_size;
-    while (rem_size > 0) {
-        obj_size = (rem_size > map->blocksize) ? map->blocksize : rem_size;
-        rem_size -= obj_size;
-        r++;
+
+    nr_objs += rem_size / map->blocksize;
+    if (rem_size & (map->blocksize - 1)) {
+        nr_objs++;
     }
 
-    return r;
+    return nr_objs;
 }
 
 /*
