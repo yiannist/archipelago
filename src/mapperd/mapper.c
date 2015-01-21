@@ -207,10 +207,9 @@ int initialize_map_objects(struct map *map)
     }
 
     for (i = 0; i < map->nr_objs; i++) {
+        mapping[i].flags = 0;
         mapping[i].vol_epoch = 0;
         mapping[i].name_idx = 0;
-        mapping[i].map = map;
-        mapping[i].objectidx = i;
         mapping[i].waiters = 0;
         mapping[i].state = 0;
         mapping[i].ref = 1;
