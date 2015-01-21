@@ -425,7 +425,7 @@ int write_map_metadata(struct peer_req *pr, struct map *map);
 struct xseg_request *__load_map(struct peer_req *pr, struct map *m);
 int read_map(struct map *map, unsigned char *buf);
 int load_map(struct peer_req *pr, struct map *map);
-struct xseg_request *__copyup_object(struct peer_req *pr, struct mapping *mn);
+struct xseg_request *copyup_object(struct peer_req *pr, struct map *map, uint64_t idx);
 void copyup_cb(struct peer_req *pr, struct xseg_request *req);
 struct xseg_request *__object_write(struct peerd *peer, struct peer_req *pr,
                                     struct map *map, struct mapping *mn);
