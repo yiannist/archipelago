@@ -35,6 +35,9 @@ enum { MAP_V0, MAP_V1, MAP_V2, MAP_V3};
 #define MAP_LATEST_VERSION MAP_V3
 #define MAP_LATEST_MOPS &v3_ops
 
+#define MAX_EPOCH (UINT32_MAX -2)
+#define MAX_NAME_IDX ((1<<30) -1)
+
 struct header_struct {
     uint32_t signature;
     uint32_t version;
@@ -244,9 +247,9 @@ struct map {
     st_cond_t users_cond;
 
     /* Length of hexlified CA name */
-    uint32_t cas_size;
+    uint32_t hex_cas_size;
     /* Length in bytes of the cas_array (hexlified) */
-    uint64_t cas_array_len;
+    uint64_t hex_cas_array_len;
     /* Length in bytes of the vol_array in the form of
      *  length | STRING
      * 2 bytes | ...
