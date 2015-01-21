@@ -2011,7 +2011,6 @@ int custom_peer_init(struct peerd *peer, int argc, char *argv[])
     for (i = 0; i < peer->nr_ops; i++) {
         struct mapper_io *mio = calloc(1, sizeof(struct mapper_io));
         mio->req_ctxs = g_hash_table_new(g_direct_hash, g_direct_equal);
-        mio->copyups_nodes = xhash_new(3, 0, XHASH_INTEGER);
         mio->pending_reqs = 0;
         mio->err = 0;
         mio->active = 0;

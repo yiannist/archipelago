@@ -277,8 +277,6 @@ struct mapperd {
 
 struct mapper_io {
     GHashTable *req_ctxs;       /* Hash table to associate issued requests with their contextes */
-                                /* It is intended to replace copyup_nodes */
-    xhash_t *copyups_nodes;     /* hash map (xseg_request) --> (corresponding mapping of copied up object) */
     volatile int err;           /* error flag */
     cb_t cb;
     volatile int active;
@@ -429,9 +427,6 @@ struct xseg_request *copyup_object(struct peer_req *pr, struct map *map, uint64_
 void copyup_cb(struct peer_req *pr, struct xseg_request *req);
 struct xseg_request *__object_write(struct peerd *peer, struct peer_req *pr,
                                     struct map *map, struct mapping *mn);
-int __set_node(struct mapper_io *mio, struct xseg_request *req,
-               struct mapping *mn);
-struct mapping *__get_node(struct mapper_io *mio, struct xseg_request *req);
 struct xseg_request *__load_map_metadata(struct peer_req *pr, struct map *map);
 int load_map_metadata(struct peer_req *pr, struct map *map);
 int delete_map_data(struct peer_req *pr, struct map *map);
