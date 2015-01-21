@@ -17,6 +17,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <mapper.h>
 
+static uint32_t nr_reqs = 0;
+static uint32_t waiters_for_req = 0;
+st_cond_t req_cond;
+char buf[XSEG_MAX_TARGETLEN + 1];
 
 static char * get_cas_name(struct map *map, uint64_t idx)
 {

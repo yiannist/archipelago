@@ -420,10 +420,6 @@ struct xseg_request *__object_write(struct peerd *peer, struct peer_req *pr,
 int __set_node(struct mapper_io *mio, struct xseg_request *req,
                struct mapping *mn);
 struct mapping *__get_node(struct mapper_io *mio, struct xseg_request *req);
-int send_request(struct peer_req *pr, struct xseg_request *req);
-struct xseg_request *get_request(struct peer_req *pr, xport dst, char *target,
-                                 uint32_t targetlen, uint64_t datalen);
-void put_request(struct peer_req *pr, struct xseg_request *req);
 struct xseg_request *__load_map_metadata(struct peer_req *pr, struct map *map);
 int load_map_metadata(struct peer_req *pr, struct map *map);
 int delete_map_data(struct peer_req *pr, struct map *map);

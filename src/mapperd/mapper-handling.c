@@ -30,26 +30,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "hash.h"
 #include "mapper.h"
 #include "mapper-versions.h"
+#include "mapper-helpers.h"
 
 
 #define NO_V0SIZE ((uint64_t)-1)
 
-static uint32_t nr_reqs = 0;
-static uint32_t waiters_for_req = 0;
-st_cond_t req_cond;
-char buf[XSEG_MAX_TARGETLEN + 1];
-
-
-
-char *null_terminate(char *target, uint32_t targetlen)
-{
-    if (targetlen > XSEG_MAX_TARGETLEN) {
-        return NULL;
-    }
-    strncpy(buf, target, targetlen);
-    buf[targetlen] = '\0';
-    return buf;
-}
 
 int __set_node(struct mapper_io *mio, struct xseg_request *req,
                struct mapping *mn)
@@ -108,102 +93,6 @@ struct mapping *__get_node(struct mapper_io *mio, struct xseg_request *req)
     }
     XSEGLOG2(&lc, D, "Found mapnode %lx req %lx on mio %lx", mn, req, mio);
     return mn;
-}
-
-int send_request(struct peer_req *pr, struct xseg_request *req)
-{
-    int r;
-    struct peerd *peer = pr->peer;
-    void *dummy;
-
-    r = xseg_set_req_data(peer->xseg, req, pr);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot set request data for req %p, pr: %p",
-                 req, pr);
-        return -1;
-    }
-    xport p = xseg_submit(peer->xseg, req, pr->portno, X_ALLOC);
-    if (p == NoPort) {
-        XSEGLOG2(&lc, E, "Cannot submit request %p, pr: %p", req, pr);
-        xseg_get_req_data(peer->xseg, req, &dummy);
-        return -1;
-    }
-    r = xseg_signal(peer->xseg, p);
-    if (r < 0)
-        XSEGLOG2(&lc, W, "Cannot signal port %u", p);
-
-    return 0;
-}
-
-#define wait_for_req() \
-	do{ \
-		ta--; \
-		waiters_for_req++; \
-		XSEGLOG2(&lc, D, "Waiting for request. Waiters: %u", \
-				waiters_for_req); \
-		st_cond_wait(req_cond); \
-	}while(0)
-
-#define signal_one_req() \
-	do { \
-		if (waiters_for_req) { \
-			ta++; \
-			waiters_for_req--; \
-			XSEGLOG2(&lc, D, "Siganling one request. Waiters: %u", \
-					waiters_for_req); \
-			st_cond_signal(req_cond); \
-		} \
-	}while(0)
-
-struct xseg_request *get_request(struct peer_req *pr, xport dst, char *target,
-                                 uint32_t targetlen, uint64_t datalen)
-{
-    int r;
-    struct peerd *peer = pr->peer;
-    struct xseg_request *req;
-    char *reqtarget;
-  retry:
-    req = xseg_get_request(peer->xseg, pr->portno, dst, X_ALLOC);
-    if (!req) {
-        if (!nr_reqs) {
-            XSEGLOG2(&lc, E, "Cannot allocate request for target %s",
-                     null_terminate(target, targetlen));
-            return NULL;
-        } else {
-            wait_for_req();
-            goto retry;
-        }
-    }
-    r = xseg_prep_request(peer->xseg, req, targetlen, datalen);
-    if (r < 0) {
-        xseg_put_request(peer->xseg, req, pr->portno);
-        if (!nr_reqs) {
-            XSEGLOG2(&lc, E, "Cannot prepare request for target",
-                     null_terminate(target, targetlen));
-            return NULL;
-        } else {
-            wait_for_req();
-            goto retry;
-        }
-    }
-
-    reqtarget = xseg_get_target(peer->xseg, req);
-    if (!reqtarget) {
-        xseg_put_request(peer->xseg, req, pr->portno);
-        return NULL;
-    }
-    strncpy(reqtarget, target, req->targetlen);
-
-    nr_reqs++;
-    return req;
-}
-
-void put_request(struct peer_req *pr, struct xseg_request *req)
-{
-    struct peerd *peer = pr->peer;
-    xseg_put_request(peer->xseg, req, pr->portno);
-    nr_reqs--;
-    signal_one_req();
 }
 
 struct xseg_request *__close_map(struct peer_req *pr, struct map *map)

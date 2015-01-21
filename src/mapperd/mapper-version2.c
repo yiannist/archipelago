@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <xseg/xseg.h>
 
 #include "mapper.h"
+#include "mapper-helpers.h"
 #include "mapper-version2.h"
 
 

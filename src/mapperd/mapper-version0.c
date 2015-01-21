@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <stdlib.h>
 
 #include "mapper.h"
+#include "mapper-helpers.h"
 #include "mapper-version0.h"
 
 /* version 0 functions */
