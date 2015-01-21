@@ -49,16 +49,16 @@ struct v3_meta_hdr {
 
 static read_meta_header_v3(struct map * map, struct v3_meta_hdr *meta_hdr)
 {
-    map->cas_size = __be32_to_cpu(meta_hdr->cas_size) * 2;
-    map->cas_array_len = __be64_to_cpu(meta_hdr->cas_array_len) * 2;
+    map->hex_cas_size = __be32_to_cpu(meta_hdr->cas_size) * 2;
+    map->hex_cas_array_len = __be64_to_cpu(meta_hdr->cas_array_len) * 2;
     map->vol_array_len = __be64_to_cpu(meta_hdr->vol_array_len);
     map->cur_vol_idx= __be32_to_cpu(meta_hdr->cur_vol_idx);
 }
 
 static write_meta_header_v3(struct map *map, struct v3_meta_hdr *meta_hdr)
 {
-    meta_hdr->cas_size = __cpu_to_be32(map->cas_size/2);
-    meta_hdr->cas_array_len = __cpu_to_be64(map->cas_array_len/2);
+    meta_hdr->cas_size = __cpu_to_be32(map->hex_cas_size/2);
+    meta_hdr->cas_array_len = __cpu_to_be64(map->hex_cas_array_len/2);
     meta_hdr->vol_array_len = __cpu_to_be64(map->vol_array_len);
     meta_hdr->cur_vol_idx = __cpu_to_be32(map->cur_vol_idx);
 }
@@ -819,7 +819,7 @@ static int __write_meta_v3(struct peer_req *pr, struct map *map)
     void *meta_buf, *vol_buf, *cas_buf;
     struct xseg_request *req;
 
-    uint32_t meta_size = V3_META_HEADER_SIZE + map->cas_array_len/2 +
+    uint32_t meta_size = V3_META_HEADER_SIZE + map->hex_cas_array_len/2 +
                                 map->vol_array_len;
 
     if (map->vol_array == NULL) {
@@ -848,9 +848,9 @@ static int __write_meta_v3(struct peer_req *pr, struct map *map)
 
     if (map->cas_array != NULL) {
         for (i = 0; i < map->cas_nr; i++) {
-            unhexlify(map->cas_names[1], cas_buf + i * map->cas_size/2);
+            unhexlify(map->cas_names[1], cas_buf + i * map->hex_cas_size/2);
         }
-        vol_buf += i * map->cas_size/2;
+        vol_buf += i * map->hex_cas_size/2;
     }
 
     for (i = 0; i < map->vol_nr; i++) {
@@ -1111,18 +1111,18 @@ static void load_meta_v3_cb(struct peer_req *pr, struct xseg_request *req)
     map->vol_names = NULL;
     map->vol_array = NULL;
 
-    if (map->cas_array_len > 0) {
-        map->cas_names = calloc(map->cas_array_len/map->cas_size, sizeof(char *));
-        map->cas_array = calloc(1, map->cas_array_len);
+    if (map->hex_cas_array_len > 0) {
+        map->cas_names = calloc(map->hex_cas_array_len/map->hex_cas_size, sizeof(char *));
+        map->cas_array = calloc(1, map->hex_cas_array_len);
         if (!map->cas_names || !map->cas_array) {
             goto out_err;
         }
 
-        for (i = 0; i < map->cas_array_len/2; i+=map->cas_size/2) {
-            hexlify((unsigned char *)map->cas_array + i * map->cas_size,
-                    map->cas_size/2, (unsigned char *)data + i *  map->cas_size/2);
+        for (i = 0; i < map->hex_cas_array_len/2; i+=map->hex_cas_size/2) {
+            hexlify((unsigned char *)map->cas_array + i * map->hex_cas_size,
+                    map->hex_cas_size/2, (unsigned char *)data + i *  map->hex_cas_size/2);
             // build index
-            map->cas_names[i] = map->cas_array + i * map->cas_size;
+            map->cas_names[i] = map->cas_array + i * map->hex_cas_size;
         }
         map->cas_nr = i;
     }
@@ -1133,7 +1133,7 @@ static void load_meta_v3_cb(struct peer_req *pr, struct xseg_request *req)
 
     uint16_t len;
     uint64_t processed = 0, c = 0, sum = 0;
-    char *vol_names = data + map->cas_array_len/2;
+    char *vol_names = data + map->hex_cas_array_len/2;
 
     while (processed < map->vol_array_len) {
         len = __be16_to_cpu(*(uint16_t *)(vol_names + processed));
@@ -1190,7 +1190,7 @@ static int __load_meta_v3(struct peer_req *pr, struct map *map)
     struct mapperd *mapper = __get_mapperd(peer);
     struct mapper_io *mio = __get_mapper_io(pr);
 
-    size = map->cas_array_len/2 + map->vol_array_len;
+    size = map->hex_cas_array_len/2 + map->vol_array_len;
     meta_object_len = get_map_meta_name(meta_object, map);
 
     req = get_request(pr, mapper->mbportno, meta_object, meta_object_len, size);

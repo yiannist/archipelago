@@ -195,14 +195,14 @@ int calculate_object_name(char *object, uint32_t *object_len, struct map *map,
             return -EINVAL;
         }
 
-        if (*object_len < map->cas_size + 1) {
+        if (*object_len < map->hex_cas_size + 1) {
             return -ERANGE;
         }
 
-        memcpy(object, cas_object, map->cas_size);
-        object[map->cas_size] = '\0';
+        memcpy(object, cas_object, map->hex_cas_size);
+        object[map->hex_cas_size] = '\0';
 
-        *object_len = map->cas_size;
+        *object_len = map->hex_cas_size;
 
         return 0;
     }
