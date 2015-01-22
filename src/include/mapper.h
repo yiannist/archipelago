@@ -152,20 +152,24 @@ typedef void (*cb_t) (struct peer_req * pr, struct xseg_request * req);
 
 
 /* map object flags */
-#define MF_OBJECT_WRITABLE	(1 << 0)
-#define MF_OBJECT_ARCHIP	(1 << 1)
-#define MF_OBJECT_ZERO		(1 << 2)
-#define MF_OBJECT_DELETED	(1 << 3)
+#define MF_OBJECT_WRITABLE  (1 << 0)
+#define MF_OBJECT_ARCHIP    (1 << 1)
+#define MF_OBJECT_ZERO      (1 << 2)
+#define MF_OBJECT_DELETED   (1 << 3)
 
 /* run time map object state flags */
-#define MF_OBJECT_COPYING	(1 << 0)
-#define MF_OBJECT_WRITING	(1 << 1)
-#define MF_OBJECT_DELETING	(1 << 2)
+#define MF_OBJECT_COPYING   (1 << 0)
+#define MF_OBJECT_WRITING   (1 << 1)
+#define MF_OBJECT_DELETING  (1 << 2)
 //#define MF_OBJECT_DESTROYED   (1 << 3)
-#define MF_OBJECT_SNAPSHOTTING	(1 << 4)
+#define MF_OBJECT_SNAPSHOTTING  (1 << 4)
 
-#define MF_OBJECT_NOT_READY	(MF_OBJECT_COPYING|MF_OBJECT_WRITING|\
-				MF_OBJECT_DELETING|MF_OBJECT_SNAPSHOTTING)
+#define MF_OBJECT_NOT_READY (                       \
+                             MF_OBJECT_COPYING      \
+                            |MF_OBJECT_WRITING      \
+                            |MF_OBJECT_DELETING     \
+                            |MF_OBJECT_SNAPSHOTTING \
+                            )
 
 struct mapping {
     uint32_t flags;
@@ -179,45 +183,48 @@ struct mapping {
 };
 
 /* map flags */
-#define MF_MAP_READONLY		(1 << 0)
-#define MF_MAP_DELETED		(1 << 1)
-#define MF_MAP_GCSCANED		(1 << 2)
+#define MF_MAP_READONLY     (1 << 0)
+#define MF_MAP_DELETED      (1 << 1)
+#define MF_MAP_GCSCANED     (1 << 2)
 
 /* run time map state flags */
-#define MF_MAP_LOADING		(1 << 0)
-#define MF_MAP_DESTROYED	(1 << 1)
-#define MF_MAP_WRITING		(1 << 2)
-#define MF_MAP_DELETING		(1 << 3)
-#define MF_MAP_DROPPING_CACHE	(1 << 4)
-#define MF_MAP_EXCLUSIVE	(1 << 5)
-#define MF_MAP_OPENING		(1 << 6)
-#define MF_MAP_CLOSING		(1 << 7)
-//#define MF_MAP_DELETED                (1 << 8)
-#define MF_MAP_SNAPSHOTTING	(1 << 9)
-#define MF_MAP_SERIALIZING	(1 << 10)
-#define MF_MAP_HASHING		(1 << 11)
-#define MF_MAP_RENAMING		(1 << 12)
-#define MF_MAP_CANCACHE		(1 << 13)
-#define MF_MAP_PURGING		(1 << 14)
-#define MF_MAP_DELETING_DATA	(1 << 15)
-#define MF_MAP_DESTROYING	(1 << 16)
-#define MF_MAP_TRUNCATING	(1 << 17)
-#define MF_MAP_LOADED       (1 << 18)
-#define MF_MAP_NOT_READY	(                       \
-                            MF_MAP_LOADING          \
+#define MF_MAP_LOADING          (1 << 0)
+#define MF_MAP_DESTROYED        (1 << 1)
+#define MF_MAP_WRITING          (1 << 2)
+#define MF_MAP_DELETING         (1 << 3)
+#define MF_MAP_DROPPING_CACHE   (1 << 4)
+#define MF_MAP_EXCLUSIVE        (1 << 5)
+#define MF_MAP_OPENING          (1 << 6)
+#define MF_MAP_CLOSING          (1 << 7)
+//#define MF_MAP_DELETED        (1 << 8)
+#define MF_MAP_SNAPSHOTTING     (1 << 9)
+#define MF_MAP_SERIALIZING      (1 << 10)
+#define MF_MAP_HASHING          (1 << 11)
+#define MF_MAP_RENAMING         (1 << 12)
+#define MF_MAP_CANCACHE         (1 << 13)
+#define MF_MAP_PURGING          (1 << 14)
+#define MF_MAP_DELETING_DATA    (1 << 15)
+#define MF_MAP_DESTROYING       (1 << 16)
+#define MF_MAP_TRUNCATING       (1 << 17)
+#define MF_MAP_CREATING         (1 << 18)
+#define MF_MAP_LOADED           (1 << 19)
+
+#define MF_MAP_NOT_READY    (                       \
+                             MF_MAP_LOADING         \
                             |MF_MAP_WRITING         \
                             |MF_MAP_DELETING        \
                             |MF_MAP_DROPPING_CACHE  \
-                            |MF_MAP_OPENING	        \
-				            |MF_MAP_SNAPSHOTTING    \
+                            |MF_MAP_OPENING         \
+                            |MF_MAP_SNAPSHOTTING    \
                             |MF_MAP_SERIALIZING     \
-				            |MF_MAP_HASHING         \
+                            |MF_MAP_HASHING         \
                             |MF_MAP_RENAMING        \
                             |MF_MAP_PURGING         \
-				            |MF_MAP_DELETING_DATA   \
+                            |MF_MAP_DELETING_DATA   \
                             |MF_MAP_DESTROYING      \
                             |MF_MAP_TRUNCATING      \
                             |MF_MAP_CLOSING         \
+                            |MF_MAP_CREATING        \
                             )
 
 /* hex value of "AMF."
