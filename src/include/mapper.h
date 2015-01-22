@@ -124,11 +124,12 @@ struct map_ops {
 };
 
 /* general mapper flags */
-#define MF_LOAD 	(1 << 0)
-#define MF_EXCLUSIVE 	(1 << 1)
-#define MF_FORCE 	(1 << 2)
-#define MF_ARCHIP	(1 << 3)
-#define MF_SERIALIZE (1 << 4)
+#define MF_LOAD         (1 << 0)
+#define MF_EXCLUSIVE    (1 << 1)
+#define MF_FORCE        (1 << 2)
+#define MF_ARCHIP       (1 << 3)
+#define MF_SERIALIZE    (1 << 4)
+#define MF_CREATE       (1 << 5)
 
 #define MAPPER_DEFAULT_BLOCKSIZE (1<<22)
 
