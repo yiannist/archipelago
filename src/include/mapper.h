@@ -202,12 +202,23 @@ struct mapping {
 #define MF_MAP_DELETING_DATA	(1 << 15)
 #define MF_MAP_DESTROYING	(1 << 16)
 #define MF_MAP_TRUNCATING	(1 << 17)
-#define MF_MAP_NOT_READY	(MF_MAP_LOADING|MF_MAP_WRITING|MF_MAP_DELETING|\
-				MF_MAP_DROPPING_CACHE|MF_MAP_OPENING|	       \
-				MF_MAP_SNAPSHOTTING|MF_MAP_SERIALIZING|        \
-				MF_MAP_HASHING|MF_MAP_RENAMING|MF_MAP_PURGING| \
-				MF_MAP_DELETING_DATA|MF_MAP_DESTROYING|        \
-				MF_MAP_TRUNCATING|MF_MAP_CLOSING)
+#define MF_MAP_LOADED       (1 << 18)
+#define MF_MAP_NOT_READY	(                       \
+                            MF_MAP_LOADING          \
+                            |MF_MAP_WRITING         \
+                            |MF_MAP_DELETING        \
+                            |MF_MAP_DROPPING_CACHE  \
+                            |MF_MAP_OPENING	        \
+				            |MF_MAP_SNAPSHOTTING    \
+                            |MF_MAP_SERIALIZING     \
+				            |MF_MAP_HASHING         \
+                            |MF_MAP_RENAMING        \
+                            |MF_MAP_PURGING         \
+				            |MF_MAP_DELETING_DATA   \
+                            |MF_MAP_DESTROYING      \
+                            |MF_MAP_TRUNCATING      \
+                            |MF_MAP_CLOSING         \
+                            )
 
 /* hex value of "AMF."
  * Stands for Archipelago Map Format */
