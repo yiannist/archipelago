@@ -617,6 +617,7 @@ int load_map(struct peer_req *pr, struct map *map)
     }
 
     map->state &= ~MF_MAP_LOADING;
+    map->state |= MF_MAP_LOADED;
     XSEGLOG2(&lc, I, "Loading map %s completed", map->volume);
 
     return 0;
