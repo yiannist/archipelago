@@ -376,13 +376,6 @@ static void wait_all_map_objects_ready(struct map *map)
     map->state &= ~MF_MAP_SERIALIZING;
 }
 
-
-struct r2o {
-    struct mapping *mn;
-    uint64_t offset;
-    uint64_t size;
-};
-
 // TODO move this to mapper_handling
 static int do_copyups(struct peer_req *pr, struct map *map, uint64_t start, int n)
 {
@@ -473,118 +466,91 @@ static int req2objs(struct peer_req *pr, struct map *map, int write)
     struct peerd *peer = pr->peer;
     struct mapper_io *mio = __get_mapper_io(pr);
     char *target = xseg_get_target(peer->xseg, pr->req);
-    uint32_t nr_objs = calc_nr_obj(map, pr->req);
-    uint64_t size = sizeof(struct xseg_reply_map) +
-        nr_objs * sizeof(struct xseg_reply_map_scatterlist);
-    uint32_t idx, i;
+    uint64_t reply_size, i, start, nr_objs;
     uint64_t rem_size, obj_index, obj_offset, obj_size;
-    struct mapping *mn;
+    struct mapping *m;
     char buf[XSEG_MAX_TARGETLEN];
     struct xseg_reply_map *reply;
 
-    XSEGLOG2(&lc, D, "Calculated %u nr_objs", nr_objs);
 
     if (pr->req->offset + pr->req->size > map->size) {
         XSEGLOG2(&lc, E, "Invalid offset/size: offset: %llu, "
-                 "size: %llu, map size: %llu",
+                         "size: %llu, map size: %llu",
                  pr->req->offset, pr->req->size, map->size);
-        return -1;
+        return -EINVAL;
     }
 
-    /* get mappings of request */
-    struct r2o *mns = calloc(nr_objs, sizeof(struct r2o));
-    if (!mns) {
-        XSEGLOG2(&lc, E, "Cannot allocate mns");
-        return -1;
-    }
+    nr_objs = calc_nr_obj(map, pr->req);
+    XSEGLOG2(&lc, D, "Calculated %u nr_objs", nr_objs);
 
-    map->users++;
-
-    idx = 0;
-    rem_size = pr->req->size;
-    obj_index = pr->req->offset / map->blocksize;
-    obj_offset = pr->req->offset & (map->blocksize - 1);        //modulo
-    obj_size =
-        (obj_offset + rem_size >
-         map->blocksize) ? map->blocksize - obj_offset : rem_size;
-    mn = get_mapping(map, obj_index);
-    if (!mn) {
-        XSEGLOG2(&lc, E, "Cannot find obj_index %llu\n",
-                 (unsigned long long) obj_index);
-        r = -1;
-        goto out;
-    }
-    mns[idx].mn = mn;
-    mns[idx].offset = obj_offset;
-    mns[idx].size = obj_size;
-    rem_size -= obj_size;
-    idx++;
-    while (rem_size > 0) {
-        obj_index++;
-        obj_offset = 0;
-        obj_size = (rem_size > map->blocksize) ? map->blocksize : rem_size;
-        rem_size -= obj_size;
-        mn = get_mapping(map, obj_index);
-        if (!mn) {
-            XSEGLOG2(&lc, E, "Cannot find obj_index %llu\n",
-                     (unsigned long long) obj_index);
-            r = -1;
-            goto out;
-        }
-        if (mn->flags & MF_OBJECT_DELETED) {
-            XSEGLOG2(&lc, E, "Trying to perform I/O on deleted object %s",
-                     mn->object);
-            r = -1;
-            goto out;
-        };
-        mns[idx].mn = mn;
-        mns[idx].offset = obj_offset;
-        mns[idx].size = obj_size;
-        idx++;
-    }
+    start = pr->req->offset/map->blocksize;
     if (write) {
-        if (do_copyups(pr, mns, idx) < 0) {
-            r = -1;
+        r = do_copyups(pr, map, start, nr_objs);
+        if (r < 0) {
             XSEGLOG2(&lc, E, "do_copyups failed");
-            goto out;
+            return r;
         }
+    } else {
+        // wait all objects ready
     }
 
     /* resize request to fit reply */
+    reply_size = sizeof(struct xseg_reply_map) +
+                 sizeof(struct xseg_reply_map_scatterlist) * nr_objs;
     strncpy(buf, target, pr->req->targetlen);
-    r = xseg_resize_request(peer->xseg, pr->req, pr->req->targetlen, size);
+    r = xseg_resize_request(peer->xseg, pr->req, pr->req->targetlen, reply_size);
     if (r < 0) {
         XSEGLOG2(&lc, E, "Cannot resize request");
-        goto out;
+        return -ENOMEM;
     }
     target = xseg_get_target(peer->xseg, pr->req);
     strncpy(target, buf, pr->req->targetlen);
 
     /* structure reply */
-    reply = (struct xseg_reply_map *) xseg_get_data(peer->xseg, pr->req);
+    reply = (struct xseg_reply_map *)xseg_get_data(peer->xseg, pr->req);
     reply->cnt = nr_objs;
-    for (i = 0; i < idx; i++) {
-        strncpy(reply->segs[i].target, mns[i].mn->object,
-                mns[i].mn->objectlen);
-        reply->segs[i].targetlen = mns[i].mn->objectlen;
-        reply->segs[i].offset = mns[i].offset;
-        reply->segs[i].size = mns[i].size;
-        reply->segs[i].flags = 0;
-        if (mns[i].mn->flags & MF_OBJECT_ZERO) {
-            reply->segs[i].flags |= XF_MAPFLAG_ZERO;
+
+    // calculate values for the first object
+    rem_size = pr->req->size;
+    obj_index = pr->req->offset / map->blocksize;
+    obj_offset = pr->req->offset & (map->blocksize - 1);        //modulo
+    if (obj_offset + rem_size > map->blocksize) {
+        obj_size = map->blocksize - obj_offset;
+    } else {
+        obj_size = rem_size;
+    }
+
+    for (i = 0; i < nr_objs; i++) {
+        m = get_mapping(map, start + i);
+        if (m->flags & MF_OBJECT_ZERO) {
+            reply->segs[i].flags = XF_MAPFLAG_ZERO;
+            reply->segs[i].targetlen = 0;
+        } else {
+            reply->segs[i].targetlen = XSEG_MAX_TARGETLEN;
+            r = calculate_object_name(reply->segs[i].target,
+                    &reply->segs[i].targetlen, map, m, start + i);
+            if (r < 0) {
+                return r;
+            }
+            reply->segs[i].flags = 0;
+        }
+
+        reply->segs[i].offset = obj_offset;
+        reply->segs[i].size = obj_size;
+
+        // calculate values for the next object
+        obj_offset = 0;
+        rem_size -= obj_size;
+        if (rem_size > map->blocksize) {
+            obj_size = map->blocksize;
+        } else {
+            obj_size = rem_size;
         }
     }
-  out:
-    for (i = 0; i < idx; i++) {
-        put_mapping(mns[i].mn);
-    }
-    free(mns);
-    mio->cb = NULL;
-    if (--map->users) {
-        signal_all_objects_ready(map);
-    }
-    return r;
+
+    return 0;
 }
+
 
 static int do_info(struct peer_req *pr, struct map *map)
 {
