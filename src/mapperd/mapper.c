@@ -1431,6 +1431,34 @@ struct map *get_map(struct peer_req *pr, char *name, uint32_t namelen,
             }
 
             return map;
+        } else if (flags & MF_CREATE) {
+            map = create_map(name, namelen, flags);
+            if (!map) {
+                return NULL;
+            }
+            r = insert_cache(mapper, map);
+            if (r < 0) {
+                XSEGLOG2(&lc, E, "Cannot insert map %s", map->volume);
+                put_map(map);
+                return NULL;
+            }
+            __get_map(map);
+
+            if (!(flags & MF_EXCLUSIVE)) {
+                return map;
+            }
+
+            r = open_map(pr, map, flags);
+            if (r < 0) {
+                if (flags & MF_FORCE) {
+                    dropcache(pr, map);
+                    signal_map(map);
+                    put_map(map);
+                    return NULL;
+                }
+            }
+
+            return map;
         } else {
             return NULL;
         }
