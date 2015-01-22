@@ -383,11 +383,13 @@ struct r2o {
     uint64_t size;
 };
 
-static int do_copyups(struct peer_req *pr, struct r2o *mns, int n)
+// TODO move this to mapper_handling
+static int do_copyups(struct peer_req *pr, struct map *map, uint64_t start, int n)
 {
     struct mapper_io *mio = __get_mapper_io(pr);
-    struct mapping *mn;
-    int i, j, can_wait = 0;
+    struct mapping *m;
+    uint64_t i;
+
     mio->pending_reqs = 0;
     mio->cb = copyup_cb;
     mio->err = 0;
@@ -397,44 +399,61 @@ static int do_copyups(struct peer_req *pr, struct r2o *mns, int n)
      * this could be done better, since now we wait also on the
      * pending copyups
      */
-    for (j = 0; j < 2 && !mio->err; j++) {
-        for (i = 0; i < n && !mio->err; i++) {
-            mn = mns[i].mn;
-            //do copyups
-            if (mn->state & MF_OBJECT_NOT_READY) {
-                if (!can_wait) {
-                    continue;
-                }
-                /* here mn->flags should be
-                 * MF_OBJECT_COPYING or MF_OBJECT_WRITING or
-                 * later MF_OBJECT_HASHING.
-                 * Otherwise it's a bug.
-                 */
-                if (mn->state != MF_OBJECT_COPYING
-                    && mn->state != MF_OBJECT_WRITING) {
-                    XSEGLOG2(&lc, E, "BUG: Map node has wrong state");
-                }
-                wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
-                if (mn->state & MF_OBJECT_DELETED) {
-                    mio->err = 1;
-                    continue;
-                }
-            }
+    for (i = start; i < (start + n) && !mio->err; i++) {
+        m = get_mapping(map, i);
+        // assert(m);
 
-            if (!(mn->flags & MF_OBJECT_WRITABLE)) {
-                //calc new_target, copy up object
-                if (__copyup_object(pr, mn) == NULL) {
-                    XSEGLOG2(&lc, E, "Error in copy up object");
-                    mio->err = 1;
-                } else {
-                    mio->pending_reqs++;
-                }
-            }
-
+        //do copyups
+        if (m->state & MF_OBJECT_NOT_READY) {
+            continue;
         }
-        can_wait = 1;
+
+        if (!(m->flags & MF_OBJECT_WRITABLE)) {
+            //calc new_target, copy up object
+            if (copyup_object(pr, map, i) == NULL) {
+                XSEGLOG2(&lc, E, "Error in copy up object");
+                mio->err = 1;
+                goto out;
+            } else {
+                mio->pending_reqs++;
+            }
+        }
     }
 
+    for (i = start; i < (start + n) && !mio->err; i++) {
+        m = get_mapping(map, i);
+        // assert(m);
+
+        if (m->state & MF_OBJECT_NOT_READY) {
+            /* here m->flags should be
+             * MF_OBJECT_COPYING or MF_OBJECT_WRITING or
+             * later MF_OBJECT_HASHING.
+             * Otherwise it's a bug.
+             */
+            if (m->state != MF_OBJECT_COPYING
+                    && m->state != MF_OBJECT_WRITING) {
+                XSEGLOG2(&lc, E, "BUG: Map node has wrong state");
+            }
+            wait_on_mapping(m, m->state & MF_OBJECT_NOT_READY);
+            /* This should never happen as delete is serialized */
+            if (m->state & MF_OBJECT_DELETED) {
+                mio->err = 1;
+                continue;
+            }
+        }
+
+        if (!(m->flags & MF_OBJECT_WRITABLE)) {
+            if (copyup_object(pr, map, i) == NULL) {
+                XSEGLOG2(&lc, E, "Error in copy up object");
+                mio->err = 1;
+                goto out;
+            } else {
+                mio->pending_reqs++;
+            }
+        }
+    }
+
+out:
     if (mio->err) {
         XSEGLOG2(&lc, E, "Mio->err, pending_copyups: %d", mio->pending_reqs);
     }
@@ -442,6 +461,8 @@ static int do_copyups(struct peer_req *pr, struct r2o *mns, int n)
     if (mio->pending_reqs > 0) {
         wait_on_pr(pr, mio->pending_reqs > 0);
     }
+
+    mio->cb = NULL;
 
     return mio->err ? -1 : 0;
 }
