@@ -1500,16 +1500,22 @@ static int map_action(int (action) (struct peer_req * pr, struct map * map),
                       struct peer_req *pr, char *name, uint32_t namelen,
                       uint32_t flags)
 {
-    //struct peerd *peer = pr->peer;
+    int r;
     struct map *map;
+
     map = get_ready_map(pr, name, namelen, flags);
     if (!map) {
-        return -1;
+        return -ENOENT;
     }
-    int r = action(pr, map);
+    map->pending_io++;
+    r = action(pr, map);
     //always drop cache if map not read exclusively
     if (!(map->state & MF_MAP_EXCLUSIVE)) {
         dropcache(pr, map);
+    }
+    map->pending_io--;
+    if (!map->pending_io) {
+        signal_all_pending_io_ready(map);
     }
     signal_map(map);
     put_map(map);
