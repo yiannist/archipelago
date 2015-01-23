@@ -1065,75 +1065,83 @@ static int do_rename(struct peer_req *pr, struct map *map)
     return 0;
 }
 
+static void log_map_io(struct peer_req *pr, struct xseg_request *reply)
+{
+    int i;
+    char buf[XSEG_MAX_TARGETLEN + 1];
+    struct peerd *peer = pr->peer;
+    struct xseg_reply_map *map_reply =
+        (struct xseg_reply_map *)xseg_get_data(peer->xseg, reply);
+
+    XSEGLOG2(&lc, D, "Total objects: %u", map_reply->cnt);
+    for (i = 0; i < map_reply->cnt; i++) {
+        if (map_reply->segs[i].flags & XF_MAPFLAG_ZERO) {
+            XSEGLOG2(&lc, D, "%d: Object: (ZERO_OBJECT), offset: %llu, size: %llu",
+                     i,
+                     (unsigned long long)map_reply->segs[i].offset,
+                     (unsigned long long)map_reply->segs[i].size);
+
+        } else {
+            strncpy(buf, map_reply->segs[i].target, map_reply->segs[i].targetlen);
+            buf[map_reply->segs[i].targetlen] = 0;
+            XSEGLOG2(&lc, D, "%d: Object: %s, offset: %llu, size: %llu",
+                     i, buf,
+                     (unsigned long long)map_reply->segs[i].offset,
+                     (unsigned long long)map_reply->segs[i].size);
+        }
+    }
+}
 
 static int do_mapr(struct peer_req *pr, struct map *map)
 {
-    struct peerd *peer = pr->peer;
     int r = req2objs(pr, map, 0);
     if (r < 0) {
         XSEGLOG2(&lc, I, "Map r of map %s, range: %llu-%llu failed",
                  map->volume,
-                 (unsigned long long) pr->req->offset,
-                 (unsigned long long) (pr->req->offset + pr->req->size));
-        return -1;
+                 (unsigned long long)pr->req->offset,
+                 (unsigned long long)(pr->req->offset + pr->req->size));
+        return r;
     }
+
     XSEGLOG2(&lc, I, "Map r of map %s, range: %llu-%llu completed",
              map->volume,
-             (unsigned long long) pr->req->offset,
-             (unsigned long long) (pr->req->offset + pr->req->size));
-    XSEGLOG2(&lc, D, "Req->offset: %llu, req->size: %llu",
-             (unsigned long long) pr->req->offset,
-             (unsigned long long) pr->req->size);
-    char buf[XSEG_MAX_TARGETLEN + 1];
-    struct xseg_reply_map *reply =
-        (struct xseg_reply_map *) xseg_get_data(peer->xseg, pr->req);
-    int i;
-    for (i = 0; i < reply->cnt; i++) {
-        XSEGLOG2(&lc, D, "i: %d, reply->cnt: %u", i, reply->cnt);
-        strncpy(buf, reply->segs[i].target, reply->segs[i].targetlen);
-        buf[reply->segs[i].targetlen] = 0;
-        XSEGLOG2(&lc, D, "%d: Object: %s, offset: %llu, size: %llu", i, buf,
-                 (unsigned long long) reply->segs[i].offset,
-                 (unsigned long long) reply->segs[i].size);
+             (unsigned long long)pr->req->offset,
+             (unsigned long long)(pr->req->offset + pr->req->size));
+
+    if (verbose >= D) {
+        log_map_io(pr, pr->req);
     }
+
     return 0;
 }
 
 static int do_mapw(struct peer_req *pr, struct map *map)
 {
-    struct peerd *peer = pr->peer;
     int r;
+
     if (map->flags & MF_MAP_READONLY) {
         XSEGLOG2(&lc, E, "Cannot write to a read only map");
-        return -1;
+        return -EROFS;
     }
+
     r = req2objs(pr, map, 1);
     if (r < 0) {
         XSEGLOG2(&lc, I, "Map w of map %s, range: %llu-%llu failed",
                  map->volume,
                  (unsigned long long) pr->req->offset,
                  (unsigned long long) (pr->req->offset + pr->req->size));
-        return -1;
+        return r;
     }
+
     XSEGLOG2(&lc, I, "Map w of map %s, range: %llu-%llu completed",
              map->volume,
              (unsigned long long) pr->req->offset,
              (unsigned long long) (pr->req->offset + pr->req->size));
-    XSEGLOG2(&lc, D, "Req->offset: %llu, req->size: %llu",
-             (unsigned long long) pr->req->offset,
-             (unsigned long long) pr->req->size);
-    char buf[XSEG_MAX_TARGETLEN + 1];
-    struct xseg_reply_map *reply =
-        (struct xseg_reply_map *) xseg_get_data(peer->xseg, pr->req);
-    int i;
-    for (i = 0; i < reply->cnt; i++) {
-        XSEGLOG2(&lc, D, "i: %d, reply->cnt: %u", i, reply->cnt);
-        strncpy(buf, reply->segs[i].target, reply->segs[i].targetlen);
-        buf[reply->segs[i].targetlen] = 0;
-        XSEGLOG2(&lc, D, "%d: Object: %s, offset: %llu, size: %llu", i, buf,
-                 (unsigned long long) reply->segs[i].offset,
-                 (unsigned long long) reply->segs[i].size);
+
+    if (verbose >= D) {
+        log_map_io(pr, pr->req);
     }
+
     return 0;
 }
 

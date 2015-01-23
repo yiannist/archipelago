@@ -145,6 +145,7 @@ static inline struct peerd *__get_peerd(void *custom_peerd)
 
 
 /* decration of "common" variables */
+extern unsigned int verbose;
 extern volatile unsigned int terminated;
 extern struct log_ctx lc;
 #ifdef ST_THREADS
