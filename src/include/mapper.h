@@ -117,7 +117,8 @@ struct map_ops {
     int (*read_object) (struct mapping * mn, unsigned char *buf);
     struct xseg_request *(*prepare_write_object) (struct peer_req * pr,
                                                   struct map * map,
-                                                  struct mapping * mn);
+                                                  uint64_t obj_idx,
+                                                  struct mapping *m);
     int (*load_map_data) (struct peer_req * pr, struct map * map);
     int (*write_map_data) (struct peer_req * pr, struct map * map);
     int (*delete_map_data) (struct peer_req * pr, struct map * map);
