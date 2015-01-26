@@ -132,6 +132,7 @@ struct map_ops {
 #define MF_CREATE       (1 << 5)
 
 #define MAPPER_DEFAULT_BLOCKSIZE (1<<22)
+#define MAPPER_DEFAULT_HEXCASSIZE (HEXLIFIED_SHA256_DIGEST_SIZE)
 
 #define MAPPER_PREFIX "archip_"
 #define MAPPER_PREFIX_LEN 7
