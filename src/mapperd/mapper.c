@@ -1903,10 +1903,28 @@ struct map *get_map(struct peer_req *pr, char *name, uint32_t namelen,
             return NULL;
         }
     } else {
-        __get_map(map);
-    }
-    return map;
+        // When we reach this point, the map was cached. That means that we have
+        // exclusive access on it.
 
+        // assert(map->state & MF_MAP_EXCLUSIVE);
+
+        __get_map(map);
+
+        if (map->state & MF_MAP_LOADED || !(flags & MF_LOAD)) {
+            return map;
+        }
+
+        r = load_map(pr, map);
+        if (r < 0) {
+            signal_map(map);
+            put_map(map);
+            return NULL;
+        }
+
+        return map;
+    }
+
+    return map;
 }
 
 static struct map *get_ready_map(struct peer_req *pr, char *name,
