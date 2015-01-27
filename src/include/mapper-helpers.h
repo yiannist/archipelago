@@ -30,6 +30,7 @@ int send_request(struct peer_req *pr, struct xseg_request *req);
 struct xseg_request *get_request(struct peer_req *pr, xport dst, char *target,
                                  uint32_t targetlen, uint64_t datalen);
 void put_request(struct peer_req *pr, struct xseg_request *req);
+int resize_request(struct peer_req *pr, struct xseg_request *req, uint64_t size);
 
 
 int calculate_object_name(char *object, uint32_t *object_len, struct map *map,
