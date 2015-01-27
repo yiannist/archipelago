@@ -2084,7 +2084,7 @@ void *handle_destroy(struct peer_req *pr)
      * check if succeeded on do_destroy
      */
     int r = map_action(do_destroy, pr, target, pr->req->targetlen,
-                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE);
+                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE | MF_SERIALIZE);
     if (r < 0) {
         fail(peer, pr);
     } else {
@@ -2099,7 +2099,7 @@ void *handle_open(struct peer_req *pr)
     struct peerd *peer = pr->peer;
     char *target = xseg_get_target(peer->xseg, pr->req);
     int r = map_action(do_open, pr, target, pr->req->targetlen,
-                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE);
+                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE | MF_SERIALIZE);
     if (r < 0) {
         fail(peer, pr);
     } else {
@@ -2115,7 +2115,7 @@ void *handle_close(struct peer_req *pr)
     char *target = xseg_get_target(peer->xseg, pr->req);
     //here we do not want to load
     int r = map_action(do_close, pr, target, pr->req->targetlen,
-                       MF_ARCHIP | MF_EXCLUSIVE | MF_FORCE);
+                       MF_ARCHIP | MF_EXCLUSIVE | MF_FORCE | MF_SERIALIZE);
     if (r < 0) {
         fail(peer, pr);
     } else {
@@ -2133,7 +2133,7 @@ void *handle_snapshot(struct peer_req *pr)
      * check if succeeded on do_snapshot
      */
     int r = map_action(do_snapshot, pr, target, pr->req->targetlen,
-                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE);
+                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE | MF_SERIALIZE);
     if (r < 0) {
         fail(peer, pr);
     } else {
@@ -2151,7 +2151,7 @@ void *handle_rename(struct peer_req *pr)
      * check if succeeded on do_snapshot
      */
     int r = map_action(do_rename, pr, target, pr->req->targetlen,
-                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE);
+                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE | MF_SERIALIZE);
     if (r < 0) {
         fail(peer, pr);
     } else {
@@ -2184,7 +2184,7 @@ void *handle_truncate(struct peer_req *pr)
     struct peerd *peer = pr->peer;
     char *target = xseg_get_target(peer->xseg, pr->req);
     int r = map_action(do_truncate, pr, target, pr->req->targetlen,
-                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE);
+                       MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE | MF_SERIALIZE);
     if (r < 0) {
         fail(peer, pr);
     } else {
