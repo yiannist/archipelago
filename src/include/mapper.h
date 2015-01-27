@@ -210,6 +210,7 @@ struct mapping {
 #define MF_MAP_TRUNCATING       (1 << 17)
 #define MF_MAP_CREATING         (1 << 18)
 #define MF_MAP_LOADED           (1 << 19)
+#define MF_MAP_COPYING          (1 << 20)
 
 #define MF_MAP_NOT_READY    (                       \
                              MF_MAP_LOADING         \
@@ -227,6 +228,7 @@ struct mapping {
                             |MF_MAP_TRUNCATING      \
                             |MF_MAP_CLOSING         \
                             |MF_MAP_CREATING        \
+                            |MF_MAP_COPYING         \
                             )
 
 /* hex value of "AMF."
