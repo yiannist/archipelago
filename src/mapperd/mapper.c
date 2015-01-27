@@ -869,8 +869,6 @@ static int do_destroy(struct peer_req *pr, struct map *map)
     XSEGLOG2(&lc, I, "Destroying map %s", map->volume);
     map->state |= MF_MAP_DESTROYING;
 
-    wait_all_map_objects_ready(map);
-
     mio->cb = object_delete_cb;
     nr_objs = map->nr_objs;
     mio->pending_reqs = 0;
@@ -899,21 +897,19 @@ static int do_destroy(struct peer_req *pr, struct map *map)
                  && mn->flags & MF_OBJECT_WRITABLE)) {
             //only remove writable archipelago objects.
             //skip already deleted
-            XSEGLOG2(&lc, D, "Skipping object %s", mn->object);
-            put_mapping(mn);
+            XSEGLOG2(&lc, D, "Skipping object %llu", i);
             continue;
         }
-        XSEGLOG2(&lc, D, "%s flags:\n  Writable: %s\n  Zero: %s\n"
-                 "  Deleted: %s\n  Archip: %s", mn->object,
+        XSEGLOG2(&lc, D, "%llu flags:\n  Writable: %s\n  Zero: %s\n"
+                 "  Deleted: %s\n  Archip: %s", i,
                  (mn->flags & MF_OBJECT_WRITABLE ? "yes" : "no"),
                  (mn->flags & MF_OBJECT_ZERO ? "yes" : "no"),
                  (mn->flags & MF_OBJECT_DELETED ? "yes" : "no"),
                  (mn->flags & MF_OBJECT_ARCHIP ? "yes" : "no"));
 
-        req = __object_delete(pr, mn);
+        req = object_delete(pr, map, i);
         if (!req) {
-            put_mapping(mn);
-            XSEGLOG2(&lc, E, "Error removing object %s", mn->object);
+            XSEGLOG2(&lc, E, "Error removing object %llu", i);
             mio->err = 1;
         }
         //mapping will be put by delete_object on completion
@@ -929,7 +925,7 @@ static int do_destroy(struct peer_req *pr, struct map *map)
         return -1;
     }
 
-    r = delete_map(pr, map, 0);
+    r = delete_map(pr, map, 1);
     if (r < 0) {
         map->state &= ~MF_MAP_DESTROYING;
         XSEGLOG2(&lc, E, "Failed to destroy map %s", map->volume);
