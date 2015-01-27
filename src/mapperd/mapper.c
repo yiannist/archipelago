@@ -1497,6 +1497,141 @@ static int do_truncate(struct peer_req *pr, struct map *map)
     return 0;
 }
 
+static do_create(struct peer_req *pr, struct map *map)
+{
+    int r;
+    struct peerd *peer = pr->peer;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    struct xseg_request *req = pr->req;
+    struct xseg_request_clone *xclone;
+    uint64_t i, nr_objs;
+    struct mapping *mappings;
+    uint16_t *vol_len;
+
+    xclone = (struct xseg_request_clone *)xseg_get_data(peer->xseg, pr->req);
+    if (!xclone) {
+        return -EINVAL;
+    }
+
+    if (!xclone->size) {
+        XSEGLOG2(&lc, E, "Cannot create volume. Size not specified");
+        return -EINVAL;
+    }
+
+    if (map->state & MF_MAP_LOADED) {
+        XSEGLOG2(&lc, E, "Target volume %s exists", map->volume);
+        return -EEXIST;
+    }
+
+    if (!(map->state & MF_MAP_EXCLUSIVE)) {
+        XSEGLOG2(&lc, E, "Cannot open map %s", map->volume);
+        XSEGLOG2(&lc, E, "Target volume %s exists", map->volume);
+        return -EEXIST;
+    }
+
+
+    XSEGLOG2(&lc, I, "Creating volume");
+
+    map->state |= MF_MAP_CREATING;
+
+    r = load_map_metadata(pr, map);
+    if (r >= 0 && !(map->flags & MF_MAP_DELETED)) {
+        XSEGLOG2(&lc, E, "Map exists %s", map->volume);
+        r = -EEXIST;
+        goto out_close;
+    }
+
+    if (map->epoch >= MAX_EPOCH - 1) {
+        XSEGLOG2(&lc, E, "Max epoch reached for %s", map->volume);
+        r = -ERANGE;
+        goto out_close;
+    }
+
+    map->epoch++;
+    map->flags = 0;
+    map->size = xclone->size;
+    map->blocksize = MAPPER_DEFAULT_BLOCKSIZE;
+    map->nr_objs = 0;
+    map->objects = NULL;
+
+
+    //TODO initalize new fields
+    map->hex_cas_size = MAPPER_DEFAULT_HEXCASSIZE;
+    map->hex_cas_array_len = 0;
+    map->vol_array_len = sizeof(uint16_t) + map->volumelen;
+    map->cur_vol_idx = 0;
+
+    map->cas_nr = 0;
+    map->vol_nr = 1;
+    map->vol_names = calloc(1, sizeof(struct vol_idx));
+    map->vol_array = calloc(1, map->volumelen);
+    if (!map->vol_names || !map->vol_array) {
+        r = -ENOMEM;
+        goto out_restore;
+    }
+
+    // construct vol_array;
+    memcpy(map->vol_array,  map->volume, map->volumelen);
+
+    // initialize volume name index
+    map->vol_names[0].len = map->volumelen;
+    map->vol_names[0].name = map->vol_array;
+
+    //populate_map with zero objects;
+    nr_objs = calc_map_obj(map);
+    mappings = calloc(nr_objs, sizeof(struct mapping));
+    if (!mappings) {
+        XSEGLOG2(&lc, E, "Cannot allocate %llu nr_objs", nr_objs);
+        r = -ENOMEM;
+        goto out_restore;
+    }
+
+    map->objects = mappings;
+    map->nr_objs = nr_objs;
+
+    initialize_map_objects(map);
+
+    for (i = 0; i < nr_objs; i++) {
+        mappings[i].flags |= MF_OBJECT_ZERO;
+    }
+
+    // we have all map in memory
+    map->state |= MF_MAP_LOADED;
+
+    r = write_map(pr, map);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot write map %s", map->volume);
+        goto out_restore;
+    }
+
+    XSEGLOG2(&lc, I, "Volume %s created", map->volume);
+
+    r = 0;
+
+out_close:
+    // all allocated resources will be freed when struct map gets freed
+    // assert(map->opened_count == mio->count)
+    if (map->opened_count == mio->count) {
+        close_map(pr, map);
+    }
+
+    map->state &= ~MF_MAP_CREATING;
+
+    return r;
+
+out_restore:
+    free(map->cas_names);
+    free(map->cas_array);
+    free(map->vol_names);
+    free(map->vol_array);
+    free(map->objects);
+
+    initialize_map_fields(map);
+
+    map->state &= ~MF_MAP_LOADED;
+
+    goto out_close;
+}
 
 static int open_load_map(struct peer_req *pr, struct map *map, uint32_t flags)
 {
