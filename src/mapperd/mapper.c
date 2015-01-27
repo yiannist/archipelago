@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <errno.h>
 #include <sched.h>
 #include <sys/syscall.h>
+#include <glib.h>
 
 #include "peer.h"
 #include "hash.h"
@@ -101,13 +102,7 @@ static void copy_object_properties(struct mapping *from, struct mapping *to)
 
 static struct map *cache_lookup(struct mapperd *mapper, char *volume)
 {
-    struct map *m = NULL;
-    int r = xhash_lookup(mapper->hashmaps, (xhashidx) volume,
-                         (xhashidx *) & m);
-    if (r < 0) {
-        return NULL;
-    }
-    return m;
+    return g_hash_table_lookup(mapper->cached_maps, volume);
 }
 
 static struct map *cache_lookup_len(struct mapperd *mapper, char *target,
@@ -120,16 +115,9 @@ static struct map *cache_lookup_len(struct mapperd *mapper, char *target,
                  targetlen, MAX_VOLUME_LEN);
         return NULL;
     }
-//      if (flags & MF_ARCHIP){
-//              strncpy(buf, MAPPER_PREFIX, MAPPER_PREFIX_LEN);
-//              strncpy(buf + MAPPER_PREFIX_LEN, target, targetlen);
-//              buf[MAPPER_PREFIX_LEN + targetlen] = 0;
-//              targetlen += MAPPER_PREFIX_LEN;
-//      }
-//      else {
+
     strncpy(buf, target, targetlen);
     buf[targetlen] = '\0';
-//      }
 
     XSEGLOG2(&lc, D, "looking up map %s, len %u", buf, targetlen);
     return cache_lookup(mapper, buf);
@@ -138,53 +126,35 @@ static struct map *cache_lookup_len(struct mapperd *mapper, char *target,
 
 static int insert_cache(struct mapperd *mapper, struct map *map)
 {
-    int r = -1;
+    int r;
 
     if (cache_lookup(mapper, map->key)) {
         XSEGLOG2(&lc, W, "Map %s found in hash maps", map->key);
-        goto out;
+        return -EEXIST;
     }
 
-    XSEGLOG2(&lc, D, "Inserting map %s, len: %d (map: %lx)",
-             map->key, strlen(map->key), (unsigned long) map);
-    r = xhash_insert(mapper->hashmaps, (xhashidx) map->key, (xhashidx) map);
-    while (r == -XHASH_ERESIZE) {
-        xhashidx shift = xhash_grow_size_shift(mapper->hashmaps);
-        xhash_t *new_hashmap = xhash_resize(mapper->hashmaps, shift, 0, NULL);
-        if (!new_hashmap) {
-            XSEGLOG2(&lc, E, "Cannot grow mapper->hashmaps to sizeshift %llu",
-                     (unsigned long long) shift);
-            goto out;
-        }
-        mapper->hashmaps = new_hashmap;
-        r = xhash_insert(mapper->hashmaps, (xhashidx) map->key,
-                         (xhashidx) map);
-    }
-  out:
-    return r;
+    XSEGLOG2(&lc, D, "Inserting map %s (map address: %p)", map->key, map);
+
+    g_hash_table_insert(mapper->cached_maps, map->key, map);
+
+    return 0;
 }
 
 static int remove_cache(struct mapperd *mapper, struct map *map)
 {
-    int r = -1;
+    gboolean ret;
 
-    //assert no pending pr on map
+    XSEGLOG2(&lc, D, "Removing map %s (map address: %p)", map->key, map);
+    ret = g_hash_table_remove(mapper->cached_maps, map->key);
 
-    r = xhash_delete(mapper->hashmaps, (xhashidx) map->key);
-    while (r == -XHASH_ERESIZE) {
-        xhashidx shift = xhash_shrink_size_shift(mapper->hashmaps);
-        xhash_t *new_hashmap = xhash_resize(mapper->hashmaps, shift, 0, NULL);
-        if (!new_hashmap) {
-            XSEGLOG2(&lc, E,
-                     "Cannot shrink mapper->hashmaps to sizeshift %llu",
-                     (unsigned long long) shift);
-            goto out;
-        }
-        mapper->hashmaps = new_hashmap;
-        r = xhash_delete(mapper->hashmaps, (xhashidx) map->volume);
+    if (!ret) {
+        XSEGLOG2(&lc, E, "Failed to remove map %s (map address: %p)", map->key, map);
+        return -ENOENT;
     }
-  out:
-    return r;
+
+    XSEGLOG2(&lc, D, "Removed map %s (map address: %p)", map->key, map);
+
+    return 0;
 }
 
 inline struct mapping *get_mapping(struct map *map, uint64_t index)
@@ -2329,7 +2299,7 @@ int custom_peer_init(struct peerd *peer, int argc, char *argv[])
     struct mapperd *mapper = calloc(1, sizeof(struct mapperd));
     peer->priv = mapper;
     //mapper = mapperd;
-    mapper->hashmaps = xhash_new(3, 0, XHASH_STRING);
+    mapper->cached_maps= g_hash_table_new(g_str_hash, g_str_equal);
 
     for (i = 0; i < peer->nr_ops; i++) {
         struct mapper_io *mio = calloc(1, sizeof(struct mapper_io));
@@ -2418,36 +2388,43 @@ int wait_reply(struct peerd *peer, struct xseg_request *expected_req)
 }
 
 
-void custom_peer_finalize(struct peerd *peer)
+void finalize_close_map(gpointer key, gpointer value, gpointer user_data)
 {
-    struct mapperd *mapper = __get_mapperd(peer);
-    struct peer_req *pr = alloc_peer_req(peer);
+    struct map *map = value;
+    struct peerd *peer = user_data;
+    struct xseg_request *req;
+    struct peer_req *pr;
+
+    if (!(map->state & MF_MAP_EXCLUSIVE)) {
+        // This should never happen;
+        return;
+    }
+
+    pr = alloc_peer_req(peer);
     if (!pr) {
         XSEGLOG2(&lc, E, "Cannot get peer request");
         return;
     }
-    struct map *map;
-    struct xseg_request *req;
-    xhash_iter_t it;
-    xhashidx key, val;
-    xhash_iter_init(mapper->hashmaps, &it);
-    while (xhash_iterate(mapper->hashmaps, &it, &key, &val)) {
-        map = (struct map *) val;
-        if (!(map->state & MF_MAP_EXCLUSIVE)) {
-            continue;
-        }
-        req = __close_map(pr, map);
-        if (!req) {
-            continue;
-        }
-        wait_reply(peer, req);
-        if (!(req->state & XS_SERVED)) {
-            XSEGLOG2(&lc, E, "Couldn't close map %s", map->volume);
-        }
-        map->state &= ~MF_MAP_CLOSING;
-        put_request(pr, req);
+
+    req = __close_map(pr, map);
+    if (!req) {
+        // LOG IT
+        XSEGLOG2(&lc, E, "Cannot close map %s", map->volume);
+        free_peer_req(peer, pr);
+        return;
     }
-    return;
 
+    wait_reply(peer, req);
+    if (!(req->state & XS_SERVED)) {
+        XSEGLOG2(&lc, E, "Couldn't close map %s", map->volume);
+    }
+    map->state &= ~MF_MAP_CLOSING;
+    put_request(pr, req);
+    free_peer_req(peer, pr);
+}
 
+void custom_peer_finalize(struct peerd *peer)
+{
+    struct mapperd *mapper = __get_mapperd(peer);
+    g_hash_table_foreach(mapper->cached_maps, finalize_close_map, peer);
 }

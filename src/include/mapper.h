@@ -296,7 +296,7 @@ struct map {
 struct mapperd {
     xport bportno;              /* blocker that accesses data */
     xport mbportno;             /* blocker that accesses maps */
-    xhash_t *hashmaps;          // hash_function(target) --> struct map
+    GHashTable *cached_maps;
 };
 
 struct mapper_io {
