@@ -2000,6 +2000,7 @@ void *handle_clone(struct peer_req *pr)
     int r;
     struct peerd *peer = pr->peer;
     //struct mapperd *mapper = __get_mapperd(peer);
+    char *target = xseg_get_target(peer->xseg, pr->req);
     struct xseg_request_clone *xclone;
     xclone = (struct xseg_request_clone *) xseg_get_data(peer->xseg, pr->req);
     if (!xclone) {
@@ -2008,95 +2009,14 @@ void *handle_clone(struct peer_req *pr)
     }
 
     if (xclone->targetlen) {
-        r = map_action(do_clone, pr, xclone->target,
-                       xclone->targetlen, MF_LOAD | MF_ARCHIP);
+        r = map_action(do_clone, pr, xclone->target, xclone->targetlen,
+                       MF_LOAD | MF_ARCHIP | MF_SERIALIZE);
     } else {
-        /* else try to create a new volume */
-        XSEGLOG2(&lc, I, "Creating volume");
-        if (!xclone->size) {
-            XSEGLOG2(&lc, E, "Cannot create volume. Size not specified");
-            r = -1;
-            goto out;
-        }
-        struct map *map;
-        char *target = xseg_get_target(peer->xseg, pr->req);
-
-        //create a new empty map of size
-        map = create_map(target, pr->req->targetlen, MF_ARCHIP);
-        if (!map) {
-            r = -1;
-            goto out;
-        }
-        /* open map to get exclusive access to map */
-        r = open_map(pr, map, 0);
-        if (r < 0) {
-            XSEGLOG2(&lc, E, "Cannot open map %s", map->volume);
-            XSEGLOG2(&lc, E, "Target volume %s exists", map->volume);
-            put_map(map);
-            r = -1;
-            goto out;
-        }
-        r = load_map_metadata(pr, map);
-        if (r >= 0 && !(map->flags & MF_MAP_DELETED)) {
-            XSEGLOG2(&lc, E, "Map exists %s", map->volume);
-            close_map(pr, map);
-            put_map(map);
-            r = -1;
-            goto out;
-        }
-        if (map->epoch >= UINT64_MAX - 2) {
-            XSEGLOG2(&lc, E, "Max epoch reached for %s", map->volume);
-            close_map(pr, map);
-            put_map(map);
-            r = -1;
-            goto out;
-        }
-        map->epoch++;
-        map->flags = 0;
-        map->size = xclone->size;
-        map->blocksize = MAPPER_DEFAULT_BLOCKSIZE;
-        map->nr_objs = 0;
-        map->objects = NULL;
-
-        //populate_map with zero objects;
-        uint64_t nr_objs = calc_map_obj(map);
-        struct mapping *mappings = calloc(nr_objs, sizeof(struct mapping));
-        if (!mappings) {
-            XSEGLOG2(&lc, E, "Cannot allocate %llu nr_objs", nr_objs);
-            close_map(pr, map);
-            put_map(map);
-            r = -1;
-            goto out;
-        }
-        map->objects = mappings;
-        map->nr_objs = nr_objs;
-
-        uint64_t i;
-        for (i = 0; i < nr_objs; i++) {
-            strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
-            mappings[i].objectlen = ZERO_BLOCK_LEN;
-            mappings[i].object[mappings[i].objectlen] = 0;    //NULL terminate
-            mappings[i].flags = MF_OBJECT_ZERO;        //MF_OBJECT_ARCHIP;
-            mappings[i].state = 0;
-            mappings[i].objectidx = i;
-            mappings[i].map = map;
-            mappings[i].ref = 1;
-            mappings[i].waiters = 0;
-            mappings[i].cond = st_cond_new();  //FIXME errcheck;
-        }
-        r = write_map(pr, map);
-        if (r < 0) {
-            XSEGLOG2(&lc, E, "Cannot write map %s", map->volume);
-            close_map(pr, map);
-            put_map(map);
-            goto out;
-        }
-        XSEGLOG2(&lc, I, "Volume %s created", map->volume);
-        r = 0;
-        close_map(pr, map);
-        put_map(map);
+        r = map_action(do_create, pr, target, pr->req->targetlen,
+                       MF_CREATE | MF_EXCLUSIVE | MF_SERIALIZE);
     }
-  out:
+
+out:
     if (r < 0) {
         fail(peer, pr);
     } else {
