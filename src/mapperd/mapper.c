@@ -252,7 +252,6 @@ static inline void put_map(struct map *map)
         }
 
         st_cond_destroy(map->pending_io_cond);
-        st_cond_destroy(map->users_cond);
 
         XSEGLOG2(&lc, I, "Freed map %s", map->volume);
 
@@ -323,10 +322,6 @@ static struct map *create_map(char *name, uint32_t namelen, uint32_t flags)
     map->ref = 1;
     map->waiters = 0;
     map->cond = st_cond_new();    //FIXME err check;
-
-    map->users = 0;
-    map->waiters_users = 0;
-    map->users_cond = st_cond_new();
 
     map->pending_io= 0;
     map->waiters_pending_io= 0;

@@ -265,10 +265,6 @@ struct map {
     volatile uint32_t waiters_pending_io;
     st_cond_t pending_io_cond;
 
-    volatile uint32_t users;
-    volatile uint32_t waiters_users;
-    st_cond_t users_cond;
-
     /* Length of hexlified CA name */
     uint32_t hex_cas_size;
     /* Length in bytes of the cas_array (hexlified) */
