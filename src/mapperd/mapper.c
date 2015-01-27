@@ -77,6 +77,21 @@ static uint64_t calc_nr_obj(struct map *map, struct xseg_request *req)
     return nr_objs;
 }
 
+static void copy_object_properties(struct mapping *from, struct mapping *to)
+{
+    if (from->flags & MF_OBJECT_ZERO) {
+        to->flags = MF_OBJECT_ZERO;
+        to->vol_epoch = 0;
+        to->name_idx = 0;
+    } else {
+        to->flags = 0;
+        to->flags |= from->flags & MF_OBJECT_ARCHIP;
+        to->flags |= from->flags & MF_OBJECT_WRITABLE;
+        to->vol_epoch = from->vol_epoch;
+        to->name_idx = from->name_idx;
+    }
+}
+
 /*
  * Map cache handling functions
  */
