@@ -629,15 +629,8 @@ static int do_close(struct peer_req *pr, struct map *map)
         XSEGLOG2(&lc, E, "Attempted to close a not opened map");
         return -1;
     }
-    /* Do not close the map while there are pending requests on the
-     * map nodes.
-     */
-    wait_all_map_objects_ready(map);
-    if (close_map(pr, map) < 0) {
-        return -1;
-    }
 
-    return 0;
+    return close_map(pr, map);
 }
 
 static int do_hash(struct peer_req *pr, struct map *map)
