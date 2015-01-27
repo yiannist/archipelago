@@ -50,6 +50,9 @@ void custom_peer_usage()
             "-mbp : port for map blocker\n" "\n");
 }
 
+static int map_action(int (action) (struct peer_req * pr, struct map * map),
+                      struct peer_req *pr, char *name, uint32_t namelen,
+                      uint32_t flags);
 
 /*
  * Helper functions
