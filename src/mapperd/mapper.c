@@ -2451,37 +2451,3 @@ void custom_peer_finalize(struct peerd *peer)
 
 
 }
-
-/*
-void print_obj(struct mapping *mn)
-{
-	fprintf(stderr, "[%llu]object name: %s[%u] exists: %c\n",
-			(unsigned long long) mn->objectidx, mn->object,
-			(unsigned int) mn->objectlen,
-			(mn->flags & MF_OBJECT_WRITABLE) ? 'y' : 'n');
-}
-
-void print_map(struct map *m)
-{
-	uint64_t nr_objs = m->size/MAPPER_DEFAULT_BLOCKSIZE;
-	if (m->size % MAPPER_DEFAULT_BLOCKSIZE)
-		nr_objs++;
-	fprintf(stderr, "Volume name: %s[%u], size: %llu, nr_objs: %llu, version: %u\n",
-			m->volume, m->volumelen,
-			(unsigned long long) m->size,
-			(unsigned long long) nr_objs,
-			m->version);
-	uint64_t i;
-	struct mapping *mn;
-	if (nr_objs > 1000000) //FIXME to protect against invalid volume size
-		return;
-	for (i = 0; i < nr_objs; i++) {
-		mn = find_object(m, i);
-		if (!mn){
-			printf("object idx [%llu] not found!\n", (unsigned long long) i);
-			continue;
-		}
-		print_obj(mn);
-	}
-}
-*/
