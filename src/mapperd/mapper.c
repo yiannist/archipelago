@@ -675,150 +675,175 @@ static int do_hash(struct peer_req *pr, struct map *map)
     return -1;
 }
 
+static int write_snapshot(struct peer_req *pr, struct map *snap_map)
+{
+    int r;
+    uint64_t i;
+    char *was_writable = NULL;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    struct map *map = mio->first_map;
+    struct map old_map;
+
+    old_map = *map;
+
+    if (snap_map->state & MF_MAP_LOADED) {
+        // assert(map->opened_count != mio->count);
+        return -EEXIST;
+    }
+    if (!(snap_map->state & MF_MAP_EXCLUSIVE)) {
+        XSEGLOG2(&lc, E, "Could not open snap map");
+        XSEGLOG2(&lc, E, "Snapshot exists");
+        return -EEXIST;
+    }
+
+    snap_map->state |= MF_MAP_CREATING;
+
+    r = load_map_metadata(pr, snap_map);
+    if (r >= 0 & !(snap_map->flags & MF_MAP_DELETED)) {
+        XSEGLOG2(&lc, E, "Snapshot exists");
+        r = -EEXIST;
+        goto out;
+    }
+
+    // TODO convert to bitmap
+    was_writable = calloc(map->nr_objs, sizeof(char));
+    if (!was_writable) {
+        r = -ENOMEM;
+        goto out;
+    }
+
+    for (i = 0; i < map->nr_objs; i++) {
+        // store old writable status
+        if (map->objects[i].flags & MF_OBJECT_WRITABLE) {
+            was_writable[i] = 1;
+            map->objects[i].flags &= ~MF_OBJECT_WRITABLE;
+        }
+    }
+
+    map->epoch++;
+    r = write_map(pr, map);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot write map %s", map->volume);
+        map->epoch--;
+        for (i = 0; i < map->nr_objs; i++) {
+            if (was_writable[i]) {
+                map->objects[i].flags |= MF_OBJECT_WRITABLE;
+            }
+        }
+        goto out;
+    }
+
+    r = delete_map_data(pr, &old_map);
+    if (r < 0) {
+        XSEGLOG2(&lc, W, "Could not delete map data for map %s (epoch: %llu)",
+                 old_map.volume, old_map.epoch);
+    }
+
+
+    snap_map->epoch++;
+
+    /* "Steal" attributes from map, to write snapshot */
+    snap_map->flags = MF_MAP_READONLY;
+    snap_map->size = map->size;
+    snap_map->blocksize = map->blocksize;
+    snap_map->nr_objs = map->nr_objs;
+    snap_map->objects = map->objects;
+
+    snap_map->hex_cas_size = map->hex_cas_size;
+    snap_map->hex_cas_array_len = map->hex_cas_array_len;
+    snap_map->vol_array_len = map->vol_array_len;
+    snap_map->cur_vol_idx = map->cur_vol_idx;
+    snap_map->cas_array = map->cas_array;
+    snap_map->vol_array = map->vol_array;
+    snap_map->cas_names = map->cas_names;
+    snap_map->vol_names = map->vol_names;
+    snap_map->cas_nr = map->cas_nr;
+    snap_map->vol_nr = map->vol_nr;
+
+    snap_map->state |= MF_MAP_LOADED;
+
+    r = write_map(pr, snap_map);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Could not write snap map");
+        r = -EIO;
+        goto out;
+    }
+
+    r = 0;
+
+out:
+    // restore snap_map here, dropping all references to map resources.
+    free(was_writable);
+
+    // assert(snap_map->opened_count == mio->count);
+    if (snap_map->opened_count == mio->count) {
+        initialize_map_fields(snap_map);
+        snap_map->state &= ~MF_MAP_LOADED;
+        close_map(pr, snap_map);
+    }
+    snap_map->state &= ~MF_MAP_CREATING;
+
+    return r;
+}
+
 static int do_snapshot(struct peer_req *pr, struct map *map)
 {
-    uint64_t i;
+    int r;
+    uint64_t i, nr_objs;
     struct peerd *peer = pr->peer;
-    //struct mapper_io *mio = __get_mapper_io(pr);
-    struct mapping *mn;
-    uint64_t nr_objs;
-    struct map *snap_map;
+    struct mapper_io *mio = __get_mapper_io(pr);
     struct xseg_request_snapshot *xsnapshot;
     char *snapname;
     uint32_t snapnamelen;
-    int r;
 
-    xsnapshot =
-        (struct xseg_request_snapshot *) xseg_get_data(peer->xseg, pr->req);
+    xsnapshot = (struct xseg_request_snapshot *)xseg_get_data(peer->xseg, pr->req);
     if (!xsnapshot) {
-        return -1;
+        return -EINVAL;
     }
     snapname = xsnapshot->target;
     snapnamelen = xsnapshot->targetlen;
 
     if (!snapnamelen) {
         XSEGLOG2(&lc, E, "Snapshot name must be provided");
-        return -1;
+        return -EINVAL;
     }
 
     if (!(map->state & MF_MAP_EXCLUSIVE)) {
         XSEGLOG2(&lc, E, "Map was not opened exclusively");
-        return -1;
+        return -EACCES;
     }
-    if (map->epoch == UINT64_MAX) {
+
+    if (map->epoch == MAX_EPOCH) {
         XSEGLOG2(&lc, E, "Max epoch reached for %s", map->volume);
         return -1;
     }
+
     XSEGLOG2(&lc, I, "Starting snapshot for map %s", map->volume);
+
     map->state |= MF_MAP_SNAPSHOTTING;
 
-    //create new map struct with name snapshot name and flag readonly.
-    snap_map = create_map(snapname, snapnamelen, MF_ARCHIP);
-    if (!snap_map) {
-        goto out_err;
-    }
-    //open/load map to check if snap exists
-    r = open_map(pr, snap_map, 0);
+    mio->first_map = map;
+    r = map_action(write_snapshot, pr, snapname, snapnamelen,
+                   MF_CREATE | MF_EXCLUSIVE | MF_SERIALIZE);
     if (r < 0) {
-        XSEGLOG2(&lc, E, "Could not open snap map");
-        XSEGLOG2(&lc, E, "Snapshot exists");
-        goto out_put;
-    }
-    r = load_map_metadata(pr, snap_map);
-    if (r >= 0 && !(map->flags & MF_MAP_DELETED)) {
-        XSEGLOG2(&lc, E, "Snapshot exists");
-        goto out_close;
-    }
-    snap_map->epoch = 0;
-    //snap_map->flags &= ~MF_MAP_DELETED;
-    snap_map->flags = MF_MAP_READONLY;
-    snap_map->objects = map->objects;
-    snap_map->size = map->size;
-    snap_map->blocksize = map->blocksize;
-    snap_map->nr_objs = map->nr_objs;
-
-
-    nr_objs = map->nr_objs;
-
-    //set all mappings read only;
-    //TODO, maybe skip that check and add an epoch number on each object.
-    //Then we can check if object is writable iff object epoch == map epoch
-    wait_all_map_objects_ready(map);
-    for (i = 0; i < nr_objs; i++) {
-        mn = get_mapping(map, i);
-        if (!mn) {
-            XSEGLOG2(&lc, E, "Could not get map node %llu for map %s",
-                     i, map->volume);
-            goto out_err;
-        }
-        // make sure all pending operations on all objects are completed
-        // Basically make sure, that no previously copy up operation,
-        // will mess with our state.
-        // This works, since only a map_w, that was processed before
-        // this request, can have issued an object write request which
-        // may be pending. Since the objects are processed in the same
-        // order by the copyup operation and the snapshot operation, we
-        // can be sure, that no previously ready objects, have changed
-        // their state into not read.
-        // No other operation that manipulated map objects can occur
-        // simutaneously with snapshot operation.
-        if (mn->state & MF_OBJECT_NOT_READY) {
-            XSEGLOG2(&lc, E, "BUG: object not ready");
-            //              wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
-        }
-
-        mn->flags &= ~MF_OBJECT_WRITABLE;
-        put_mapping(mn);
-    }
-    //increase epoch
-    map->epoch++;
-    //write map
-    r = write_map(pr, map);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot write map %s", map->volume);
-        /* Not restoring epoch or writable status here, is not
-         * devastating, since this is not the common case, and it can
-         * only cause unneeded copy-on-write operations.
-         */
-	/* With epoched mapfiles, we should probably restore things here.
-	 * We need to restore only in memory, since if we fail we have either:
-	 * a) written nothing
-	 * b) written partial mapping data on a new epoched file, which can be
-	 *    overwritten on the future or garbage collected, whatever comes
-	 *    first.
-	 * Maybe use a double object array ? */
-        goto out_err;
-    }
-    //write snapshot map
-    r = write_map(pr, snap_map);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Write of snapshot map failed");
-        goto out_unset;
+        XSEGLOG2(&lc, W, "Could not create snapshot map %s",
+                 null_terminate(snapname, snapnamelen));
     }
 
-    close_map(pr, snap_map);
-    snap_map->objects = NULL;
-    put_map(snap_map);
-
+out:
     map->state &= ~MF_MAP_SNAPSHOTTING;
 
     if (map->opened_count == mio->count) {
         close_map(pr, map);
     }
 
-    XSEGLOG2(&lc, I, "Snapshot for map %s completed", map->volume);
-    return 0;
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Snapshot for map %s failed", map->volume);
+    } else {
+        XSEGLOG2(&lc, I, "Snapshot for map %s completed", map->volume);
+    }
 
-  out_unset:
-    snap_map->objects = NULL;
-  out_close:
-    close_map(pr, snap_map);
-  out_put:
-    put_map(snap_map);
-  out_err:
-    map->state &= ~MF_MAP_SNAPSHOTTING;
-    XSEGLOG2(&lc, E, "Snapshot for map %s failed", map->volume);
-    return -1;
+    return r;
 }
 
 /* This should probably me a map function */
