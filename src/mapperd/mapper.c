@@ -186,31 +186,25 @@ static int remove_cache(struct mapperd *mapper, struct map *map)
 
 inline struct mapping *get_mapping(struct map *map, uint64_t index)
 {
-    struct mapping *m;
+    // assert(index < map->nr_objs);
+    // assert(map->objects);
     if (index >= map->nr_objs) {
-        //      XSEGLOG2(&lc, E, "Index out of range: %llu > %llu",
-        //                      index, map->nr_objs);
+        XSEGLOG2(&lc, E, "Index out of range: %llu > %llu",
+                 index, map->nr_objs);
         return NULL;
     }
 
     if (!map->objects) {
-        //      XSEGLOG2(&lc, E, "Map %s has no objects", map->volume);
+        XSEGLOG2(&lc, E, "Map %s has no objects", map->volume);
         return NULL;
     }
-    m = &map->objects[index];
-    m->ref++;
-    //XSEGLOG2(&lc, D,  "mapping %p: ref: %u", mn, mn->ref);
-    return mn;
+
+    return &map->objects[index];
 }
 
 inline void put_mapping(struct mapping *m)
 {
-    mn->ref--;
-    //XSEGLOG2(&lc, D, "mapping %p: ref: %u", mn, mn->ref);
-    if (!mn->ref) {
-        //clean up mn
-        st_cond_destroy(mn->cond);
-    }
+    return;
 }
 
 int initialize_map_objects(struct map *map)
