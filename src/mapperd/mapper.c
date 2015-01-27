@@ -450,14 +450,10 @@ static int req2objs(struct peer_req *pr, struct map *map, int write)
     /* resize request to fit reply */
     reply_size = sizeof(struct xseg_reply_map) +
                  sizeof(struct xseg_reply_map_scatterlist) * nr_objs;
-    strncpy(buf, target, pr->req->targetlen);
-    r = xseg_resize_request(peer->xseg, pr->req, pr->req->targetlen, reply_size);
+    r = resize_request(pr, pr->req, reply_size);
     if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot resize request");
-        return -ENOMEM;
+        return r;
     }
-    target = xseg_get_target(peer->xseg, pr->req);
-    strncpy(target, buf, pr->req->targetlen);
 
     /* structure reply */
     reply = (struct xseg_reply_map *)xseg_get_data(peer->xseg, pr->req);
@@ -515,16 +511,10 @@ static int do_info(struct peer_req *pr, struct map *map)
     int r;
 
     if (req->datalen < sizeof(struct xseg_reply_info)) {
-        target = xseg_get_target(peer->xseg, req);
-        strncpy(buf, target, req->targetlen);
-        r = xseg_resize_request(peer->xseg, req, req->targetlen,
-                                sizeof(struct xseg_reply_info));
+        r = resize_request(pr, pr->req, sizeof(struct xseg_reply_info));
         if (r < 0) {
-            XSEGLOG2(&lc, E, "Cannot resize request");
-            return -1;
+            return r;
         }
-        target = xseg_get_target(peer->xseg, req);
-        strncpy(target, buf, req->targetlen);
     }
 
     xinfo = (struct xseg_reply_info *) xseg_get_data(peer->xseg, req);
