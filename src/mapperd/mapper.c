@@ -334,34 +334,6 @@ static struct map *create_map(char *name, uint32_t namelen, uint32_t flags)
     return map;
 }
 
-static void wait_all_map_objects_ready(struct map *map)
-{
-    uint64_t i;
-    struct mapping *mn;
-
-    //TODO: maybe add counter on the map on how many objects are used, to
-    //speed up the common case, where there are no used objects.
-    map->state |= MF_MAP_SERIALIZING;
-    if (map->users) {
-        wait_all_objects_ready(map);
-    }
-
-    for (i = 0; i < map->nr_objs; i++) {
-        mn = get_mapping(map, i);
-        if (mn) {
-            //make sure all pending operations on all objects are completed
-            if (mn->state & MF_OBJECT_NOT_READY) {
-                XSEGLOG2(&lc, E, "BUG: Map node %x of map %s, "
-                         "idx: %llu is not ready", mn, map->volume, i);
-//                              wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
-            }
-            put_mapping(mn);
-        }
-    }
-
-    map->state &= ~MF_MAP_SERIALIZING;
-}
-
 // TODO move this to mapper_handling
 static int do_copyups(struct peer_req *pr, struct map *map, uint64_t start, int n)
 {
@@ -961,10 +933,6 @@ static int rename_map(struct peer_req *pr, struct map *map,
     new_map->flags = map->flags;
 
     nr_objs = map->nr_objs;
-
-    //TODO, maybe skip that check and add an epoch number on each object.
-    //Then we can check if object is writable iff object epoch == map epoch
-    wait_all_map_objects_ready(map);
 
     //write new map
     r = write_map(pr, new_map);
