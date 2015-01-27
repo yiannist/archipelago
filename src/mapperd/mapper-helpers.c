@@ -130,6 +130,25 @@ int send_request(struct peer_req *pr, struct xseg_request *req)
 	return 0;
 }
 
+int resize_request(struct peer_req *pr, struct xseg_request *req, uint64_t size)
+{
+	int r;
+	struct peerd *peer = pr->peer;
+    char *target;
+    char buf[XSEG_MAX_TARGETLEN];
+
+    target = xseg_get_target(peer->xseg, pr->req);
+    strncpy(buf, target, pr->req->targetlen);
+    r = xseg_resize_request(peer->xseg, pr->req, pr->req->targetlen, size);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot resize request");
+        return -ENOMEM;
+    }
+    target = xseg_get_target(peer->xseg, pr->req);
+    strncpy(target, buf, pr->req->targetlen);
+
+    return 0;
+}
 
 static char * get_cas_name(struct map *map, uint64_t idx)
 {
