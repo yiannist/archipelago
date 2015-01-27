@@ -315,60 +315,50 @@ static void initialize_map_fields(struct map *map)
 
 static struct map *create_map(char *name, uint32_t namelen, uint32_t flags)
 {
+    struct map *map;
+
     if (namelen + MAPPER_PREFIX_LEN > MAX_VOLUME_LEN) {
         XSEGLOG2(&lc, E, "Namelen %u too long. Max: %d",
                  namelen, MAX_VOLUME_LEN - MAPPER_PREFIX_LEN);
         return NULL;
     }
-    struct map *m = calloc(1, sizeof(struct map));
-    if (!m) {
+
+    map = calloc(1, sizeof(struct map));
+    if (!map) {
         XSEGLOG2(&lc, E, "Cannot allocate map ");
         return NULL;
     }
-    m->size = -1;
-    strncpy(m->volume, name, namelen);
-    m->volume[namelen] = '\0';
-    m->volumelen = namelen;
+    strncpy(map->volume, name, namelen);
+    map->volume[namelen] = '\0';
+    map->volumelen = namelen;
     //initialize key to volume name
-    strncpy(m->key, name, namelen);
-    m->key[namelen] = '\0';
+    strncpy(map->key, name, namelen);
+    map->key[namelen] = '\0';
     /* Use the latest map version here, when creating a new map. If
      * the map is read from storage, this version will be rewritten
      * with the right value.
      */
-    m->version = MAP_LATEST_VERSION;
-    m->mops = MAP_LATEST_MOPS;
-    m->flags = 0;
+    map->version = MAP_LATEST_VERSION;
+    map->mops = MAP_LATEST_MOPS;
 
-    m->signature = MAP_SIGNATURE;
-    m->epoch = 0;
-    m->state = 0;
-    m->nr_objs = 0;
-    m->objects = NULL;
-    m->ref = 1;
-    m->waiters = 0;
-    m->cond = st_cond_new();    //FIXME err check;
+    initialize_map_fields(map);
 
-    m->hex_cas_size = 0;
-    m->hex_cas_array_len = 0;
-    m->vol_array_len = 0;
-    m->cur_vol_idx = 0;
-    m->cas_nr = 0;
-    m->vol_nr = 0;
-    m->cas_names = NULL;
-    m->vol_names = NULL;
-    m->cas_array = NULL;
-    m->vol_array = NULL;
+    map->signature = MAP_SIGNATURE;
+    map->state = 0;
 
-    m->users = 0;
-    m->waiters_users = 0;
-    m->users_cond = st_cond_new();
+    map->ref = 1;
+    map->waiters = 0;
+    map->cond = st_cond_new();    //FIXME err check;
 
-    m->pending_io= 0;
-    m->waiters_pending_io= 0;
-    m->pending_io_cond = st_cond_new();
+    map->users = 0;
+    map->waiters_users = 0;
+    map->users_cond = st_cond_new();
 
-    return m;
+    map->pending_io= 0;
+    map->waiters_pending_io= 0;
+    map->pending_io_cond = st_cond_new();
+
+    return map;
 }
 
 static void wait_all_map_objects_ready(struct map *map)
