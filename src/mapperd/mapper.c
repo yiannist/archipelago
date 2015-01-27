@@ -305,6 +305,26 @@ static void change_map_volume(struct map *map, char *name, uint32_t namelen)
     map->volumelen = namelen;
 }
 
+static void initialize_map_fields(struct map *map)
+{
+    map->flags = 0;
+    map->epoch = 0;
+    map->nr_objs = 0;
+    map->size = 0;
+    map->blocksize = 0;
+    map->objects = NULL;
+    map->hex_cas_size = 0;
+    map->hex_cas_array_len = 0;
+    map->vol_array_len = 0;
+    map->cur_vol_idx = 0;
+    map->cas_nr = 0;
+    map->vol_nr = 0;
+    map->cas_names = NULL;
+    map->vol_names = NULL;
+    map->cas_array = NULL;
+    map->vol_array = NULL;
+}
+
 static struct map *create_map(char *name, uint32_t namelen, uint32_t flags)
 {
     if (namelen + MAPPER_PREFIX_LEN > MAX_VOLUME_LEN) {
