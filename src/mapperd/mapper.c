@@ -33,6 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "hash.h"
 #include "mapper.h"
 #include "mapper-versions.h"
+#include "mapper-helpers.h"
 
 uint64_t accepted_req_count = 0;
 
@@ -1632,6 +1633,179 @@ out_restore:
 
     goto out_close;
 }
+
+int do_compose(struct peer_req *pr, struct map *map)
+{
+    int r;
+    uint64_t i, nr_objs;
+    struct peerd *peer = pr->peer;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    struct xseg_request_create *mapdata;
+    struct mapping *mappings;
+    char *next_cas_name;
+
+    if (map->state & MF_MAP_LOADED) {
+        XSEGLOG2(&lc, E, "Target volume %s exists", map->volume);
+        return -EEXIST;
+    }
+
+    if (!(map->state & MF_MAP_EXCLUSIVE)) {
+        XSEGLOG2(&lc, E, "Cannot open map %s", map->volume);
+        XSEGLOG2(&lc, E, "Target volume %s exists", map->volume);
+        return -EEXIST;
+    }
+
+    XSEGLOG2(&lc, I, "Creating volume");
+
+    map->state |= MF_MAP_CREATING;
+
+    r = load_map_metadata(pr, map);
+    if (r >= 0 && !(map->flags & MF_MAP_DELETED)) {
+        XSEGLOG2(&lc, E, "Map exists %s", map->volume);
+        r = -EEXIST;
+        goto out_close;
+    }
+
+    // Give room for at least on snapshot
+    if (map->epoch >= (MAX_EPOCH - 1)) {
+        XSEGLOG2(&lc, E, "Max epoch reached for %s", map->volume);
+        r = -ERANGE;
+        goto out_close;
+    }
+
+    mapdata = (struct xseg_request_create *)xseg_get_data(peer->xseg, pr->req);
+
+    map->epoch++;
+    map->flags = 0;
+
+    if (mapdata->create_flags & XF_MAPFLAG_READONLY) {
+        map->flags |= MF_MAP_READONLY;
+    }
+
+    map->size = pr->req->size;
+    if (!mapdata->blocksize) {
+        map->blocksize = MAPPER_DEFAULT_BLOCKSIZE;
+    } else if (!is_valid_blocksize(mapdata->blocksize)) {
+        r = -EINVAL;
+        goto out_restore;
+    } else {
+        map->blocksize = mapdata->blocksize;
+    }
+
+    map->nr_objs = 0;
+    map->objects = NULL;
+
+
+    nr_objs = calc_map_obj(map);
+    if (nr_objs != mapdata->cnt) {
+        XSEGLOG2(&lc, E, "Map size does not match supplied objects");
+        r = -EINVAL;
+        goto out_restore;
+    }
+
+    mappings = calloc(nr_objs, sizeof(struct mapping));
+    if (!mappings) {
+        XSEGLOG2(&lc, E, "Cannot allocate %llu nr_objs", nr_objs);
+        r = -ENOMEM;
+        goto out_restore;
+    }
+
+    map->objects = mappings;
+    map->nr_objs = nr_objs;
+
+    map->hex_cas_size = MAPPER_DEFAULT_HEXCASSIZE;
+    map->hex_cas_array_len = 0;
+    map->vol_array_len = sizeof(uint16_t) + map->volumelen;
+    map->cur_vol_idx = 0;
+
+    map->cas_nr = 0;
+    map->vol_nr = 1;
+
+    // allocate as if everyobject was not zero object
+    map->cas_names = calloc(nr_objs, sizeof(char *));
+    map->cas_array = calloc(nr_objs, map->hex_cas_size);
+    map->vol_names = calloc(1, sizeof(struct vol_idx));
+    map->vol_array = calloc(1, map->volumelen);
+    if (!map->cas_names || !map->cas_array || !map->vol_names || !map->vol_array) {
+        r = -ENOMEM;
+        goto out_restore;
+    }
+
+    map->vol_names[0].len = map->volumelen;
+    map->vol_names[0].name = map->vol_array + sizeof(uint16_t);
+
+    initialize_map_objects(map);
+
+    next_cas_name = map->cas_array;
+    for (i = 0; i < nr_objs; i++) {
+        if (mapdata->segs[i].flags & XF_MAPFLAG_ZERO) {
+            mappings[i].flags = MF_OBJECT_ZERO;
+            XSEGLOG2(&lc, D, "%d: (ZERO_OBJECT)", i);
+        } else {
+            //assert(mapdata->segs[i].targetlen == MAPPER_DEFAULT_HEXCASSIZE);
+
+            if (mapdata->segs[i].targetlen != map->hex_cas_size) {
+                r = -EINVAL;
+                goto out_restore;
+            }
+
+            mappings[i].name_idx = map->cas_nr;
+
+            memcpy(next_cas_name, mapdata->segs[i].target, mapdata->segs[i].targetlen);
+            map->cas_names[map->cas_nr] = next_cas_name;
+            next_cas_name += map->hex_cas_size;
+            map->hex_cas_array_len += map->hex_cas_size;
+            map->cas_nr++;
+
+            XSEGLOG2(&lc, D, "%d: %s (%u)", i,
+                     null_terminate(mapdata->segs[i].target, mapdata->segs[i].targetlen),
+                     mapdata->segs[i].targetlen);
+
+            mappings[i].flags = 0;
+            if (!(mapdata->segs[i].flags & XF_MAPFLAG_READONLY)) {
+                mappings[i].flags |= MF_OBJECT_WRITABLE;
+            }
+        }
+    }
+
+    // assert(map->hex_cas_array_len == map->cas_nr * map->hex_cas_size);
+
+    map->state |= MF_MAP_LOADED;
+
+    r = write_map(pr, map);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot write map %s", map->volume);
+        goto out_restore;
+    }
+
+    XSEGLOG2(&lc, I, "Volume %s created", map->volume);
+    r = 0;
+
+out_close:
+
+    // assert(map->opened_count == mio->count)
+    if (map->opened_count == mio->count) {
+        close_map(pr, map);
+    }
+
+    map->state &= ~MF_MAP_CREATING;
+
+    return r;
+
+out_restore:
+    free(map->cas_names);
+    free(map->cas_array);
+    free(map->vol_names);
+    free(map->vol_array);
+    free(map->objects);
+
+    initialize_map_fields(map);
+
+    map->state &= ~MF_MAP_LOADED;
+
+    goto out_close;
+}
+
 
 static int open_load_map(struct peer_req *pr, struct map *map, uint32_t flags)
 {
