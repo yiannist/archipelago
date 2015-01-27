@@ -1182,118 +1182,208 @@ static int do_mapw(struct peer_req *pr, struct map *map)
     return 0;
 }
 
-//here map is the parent map
-static int do_clone(struct peer_req *pr, struct map *map)
+static int write_clone(struct peer_req *pr, struct map *clone_map)
 {
-    long i, c;
     int r;
+    long i, c;
     struct peerd *peer = pr->peer;
-    //struct mapperd *mapper = __get_mapperd(peer);
+    struct mapper_io *mio = __get_mapper_io(pr);
     char *target = xseg_get_target(peer->xseg, pr->req);
-    struct map *clonemap;
-    struct mapping *mappings, *mn;
+    struct mapping *mappings, *m;
+    struct map *map = mio->first_map;
     struct xseg_request_clone *xclone =
         (struct xseg_request_clone *) xseg_get_data(peer->xseg, pr->req);
+    uint16_t *len;
+    void *vols;
 
-    if (!(map->flags & MF_MAP_READONLY)) {
-        XSEGLOG2(&lc, E, "Cloning is supported only from a snapshot");
-        return -1;
+    if (clone_map->state & MF_MAP_LOADED) {
+        // assert(map->opened_count != mio->count);
+        return -EEXIST;
     }
 
-    XSEGLOG2(&lc, I, "Cloning map %s", map->volume);
-    clonemap = create_map(target, pr->req->targetlen, MF_ARCHIP);
-    if (!clonemap) {
-        XSEGLOG2(&lc, E, "Create map %s failed");
-        return -1;
+    if (!(clone_map->state & MF_MAP_EXCLUSIVE)) {
+        XSEGLOG2(&lc, E, "Could not open clone map");
+        XSEGLOG2(&lc, E, "Volume exists");
+        return -EEXIST;
     }
 
-    /* open map to get exclusive access to map */
-    r = open_map(pr, clonemap, 0);
-    if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot open map %s", clonemap->volume);
-        XSEGLOG2(&lc, E, "Target volume %s exists", clonemap->volume);
-        goto out_put;
-    }
-    r = load_map_metadata(pr, clonemap);
-    if (r >= 0 && !(clonemap->flags & MF_MAP_DELETED)) {
-        XSEGLOG2(&lc, E, "Target volume %s exists", clonemap->volume);
-        goto out_close;
+    clone_map->state |= MF_MAP_CREATING;
+
+    r = load_map_metadata(pr, clone_map);
+    if (r >= 0 & !(clone_map->flags & MF_MAP_DELETED)) {
+        XSEGLOG2(&lc, E, "Volume exists");
+        r = -EEXIST;
+        goto out_restore;
     }
 
     /* Make sure, we can take at least one snapshot of the new volume */
-    if (map->epoch >= UINT64_MAX - 2) {
-        XSEGLOG2(&lc, E, "Max epoch reached for %s", clonemap->volume);
-        goto out_close;
+    if (map->epoch >= MAX_EPOCH - 1) {
+        XSEGLOG2(&lc, E, "Max epoch reached for %s", clone_map->volume);
+        r = -ERANGE;
+        goto out_restore;
     }
-    clonemap->flags = 0;
-    clonemap->epoch++;
+
+    clone_map->flags = 0;
+    clone_map->epoch++;
+    clone_map->blocksize = MAPPER_DEFAULT_BLOCKSIZE;
 
     if (!(xclone->size)) {
-        clonemap->size = map->size;
+        clone_map->size = map->size;
     } else {
-        clonemap->size = xclone->size;
-    }
-    if (clonemap->size < map->size) {
-        XSEGLOG2(&lc, W, "Requested clone size (%llu) < map size (%llu)"
-                 "\n\t for requested clone %s",
-                 (unsigned long long) clonemap->size,
-                 (unsigned long long) map->size, clonemap->volume);
-        goto out_close;
+        clone_map->size = xclone->size;
     }
 
-    clonemap->blocksize = MAPPER_DEFAULT_BLOCKSIZE;
+    if (clone_map->size < map->size) {
+        XSEGLOG2(&lc, E, "Requested clone size (%llu) < map size (%llu)"
+                 " for requested clone %s",
+                 (unsigned long long)clone_map->size,
+                 (unsigned long long)map->size,
+                 clone_map->volume);
+        r = -EINVAL;
+        goto out_restore;
+    }
+
+
+    clone_map->hex_cas_size = map->hex_cas_size;
+    clone_map->hex_cas_array_len = map->hex_cas_array_len;
+    clone_map->vol_array_len = map->vol_array_len + sizeof(uint16_t) + clone_map->volumelen;
+    clone_map->cur_vol_idx = map->cur_vol_idx + 1;
+
+    if (map->cas_array) {
+        clone_map->cas_nr = map->cas_nr;
+        clone_map->cas_names = calloc(clone_map->cas_nr, sizeof(char *));
+        clone_map->cas_array = calloc(1, clone_map->hex_cas_array_len);
+        if (!clone_map->cas_array || !clone_map->cas_names) {
+            r = -ENOMEM;
+            goto out_restore;
+        }
+
+        memcpy(clone_map->cas_array, map->cas_array, map->hex_cas_array_len);
+        for (i = 0; i < clone_map->cas_nr; i++) {
+            clone_map->cas_names[i] = clone_map->cas_array + i * clone_map->hex_cas_size;
+        }
+    }
+
+
+    uint64_t sum = 0;
+    for (i = 0; i < map->vol_nr; i++) {
+        sum += map->vol_names[i].len;
+    }
+
+    if (map->vol_nr >= MAX_NAME_IDX) {
+        r = -EINVAL;
+        goto out_restore;
+    }
+
+    // assert(map->vol_array);
+    clone_map->vol_nr = map->vol_nr + 1;
+    clone_map->vol_names = calloc(clone_map->vol_nr, sizeof(struct vol_idx));
+    clone_map->vol_array = calloc(1, sum + clone_map->volumelen);
+    if (!clone_map->vol_names || !clone_map->vol_array) {
+        r = -ENOMEM;
+        goto out_restore;
+    }
+
+    memcpy(clone_map->vol_array, map->vol_array, sum);
+    memcpy(clone_map->vol_array + sum, clone_map->volume, clone_map->volumelen);
+
+    vols = clone_map->vol_array;
+    for (i = 0; i < map->vol_nr; i++) {
+        clone_map->vol_names[i].len = map->vol_names[i].len;
+        clone_map->vol_names[i].name = vols;
+        XSEGLOG2(&lc, D, "Volname %i: %.*s", i, clone_map->vol_names[i].len, clone_map->vol_names[i].name);
+        vols += clone_map->vol_names[i].len;
+    }
+    clone_map->vol_names[i].len = clone_map->volumelen;
+    clone_map->vol_names[i].name = vols;
+    XSEGLOG2(&lc, D, "Volname %s [%u]" , clone_map->volume, clone_map->volumelen);
+    // assert(vols == clone_map->vol_array + sum);
+
+
     //alloc and init mappings
-    c = calc_map_obj(clonemap);
+    c = calc_map_obj(clone_map);
     mappings = calloc(c, sizeof(struct mapping));
     if (!mappings) {
-        goto out_close;
-    }
-    clonemap->objects = mappings;
-    clonemap->nr_objs = c;
-    for (i = 0; i < c; i++) {
-        mn = get_mapping(map, i);
-        if (mn) {
-            strncpy(mappings[i].object, mn->object, mn->objectlen);
-            mappings[i].objectlen = mn->objectlen;
-            mappings[i].flags = 0;
-            if (mn->flags & MF_OBJECT_ARCHIP) {
-                mappings[i].flags |= MF_OBJECT_ARCHIP;
-            }
-            if (mn->flags & MF_OBJECT_ZERO) {
-                mappings[i].flags |= MF_OBJECT_ZERO;
-            }
-            put_mapping(mn);
-        } else {
-            strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
-            mappings[i].objectlen = ZERO_BLOCK_LEN;
-            mappings[i].flags = MF_OBJECT_ZERO;
-        }
-        mappings[i].object[mappings[i].objectlen] = '\0';     //NULL terminate
-        mappings[i].state = 0;
-        mappings[i].objectidx = i;
-        mappings[i].map = clonemap;
-        mappings[i].ref = 1;
-        mappings[i].waiters = 0;
-        mappings[i].cond = st_cond_new();      //FIXME errcheck;
+        r = -ENOMEM;
+        goto out_restore;
     }
 
-    r = write_map(pr, clonemap);
+    clone_map->objects = mappings;
+    clone_map->nr_objs = c;
+
+    initialize_map_objects(clone_map);
+
+    for (i = 0; i < c; i++) {
+        if (i < map->nr_objs) {
+            m = get_mapping(map, i);
+            // assert(!(m->flags & MF_OBJECT_WRITABLE));
+            copy_object_properties(m, &mappings[i]);
+        } else {
+            mappings[i].flags = MF_OBJECT_ZERO;
+        }
+    }
+
+    map->state |= MF_MAP_LOADED;
+
+    r = write_map(pr, clone_map);
     if (r < 0) {
-        XSEGLOG2(&lc, E, "Cannot write map %s", clonemap->volume);
-        goto out_close;
+        XSEGLOG2(&lc, E, "Cannot write map %s", clone_map->volume);
+        goto out_restore;
     }
 
     XSEGLOG2(&lc, I, "Cloning map %s to %s completed",
-             map->volume, clonemap->volume);
-    close_map(pr, clonemap);
-    put_map(clonemap);
-    return 0;
+             map->volume, clone_map->volume);
 
-  out_close:
-    close_map(pr, clonemap);
-  out_put:
-    put_map(clonemap);
-    return -1;
+    r = 0;
+
+out:
+    clone_map->state &= ~MF_MAP_CREATING;
+
+    // assert (clone_map->opened_count == mio->count);
+
+    close_map(pr, clone_map);
+    // if this fails, the clone_map will remain locked and cached.
+    // no big problem, as long as:
+    // a) we log it
+    // b) we have constructed clone_map correctly or properly restored it to a
+    // dummy entry uppon failure.
+
+    return r;
+
+out_restore:
+    free(clone_map->cas_names);
+    free(clone_map->cas_array);
+    free(clone_map->vol_names);
+    free(clone_map->vol_array);
+    free(clone_map->objects);
+
+    initialize_map_fields(clone_map);
+
+    clone_map->state &= ~MF_MAP_LOADED;
+
+    goto out;
+}
+
+//here map is the parent map
+static int do_clone(struct peer_req *pr, struct map *map)
+{
+    int r;
+    struct peerd *peer = pr->peer;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    char *target = xseg_get_target(peer->xseg, pr->req);
+
+    if (!(map->flags & MF_MAP_READONLY)) {
+        XSEGLOG2(&lc, E, "Cloning is supported only from a snapshot");
+        return -EINVAL;
+    }
+
+    mio->first_map = map;
+    XSEGLOG2(&lc, I, "Cloning map %s", map->volume);
+
+    r = map_action(write_clone, pr, target, pr->req->targetlen,
+                    MF_CREATE | MF_EXCLUSIVE | MF_SERIALIZE);
+
+    return r;
 }
 
 static int truncate_map(struct peer_req *pr, struct map *map, uint64_t offset)
