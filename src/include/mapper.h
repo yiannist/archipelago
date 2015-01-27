@@ -460,25 +460,17 @@ static inline int is_valid_blocksize(uint64_t x)
 }
 
 /* map handling functions */
-struct xseg_request *__open_map(struct peer_req *pr, struct map *m,
-                                uint32_t flags);
 int open_map(struct peer_req *pr, struct map *map, uint32_t flags);
 struct xseg_request *__close_map(struct peer_req *pr, struct map *map);
 int close_map(struct peer_req *pr, struct map *map);
-struct xseg_request *__write_map(struct peer_req *pr, struct map *map);
 int write_map(struct peer_req *pr, struct map *map);
 int write_map_metadata(struct peer_req *pr, struct map *map);
-struct xseg_request *__load_map(struct peer_req *pr, struct map *m);
-int read_map(struct map *map, unsigned char *buf);
 int load_map(struct peer_req *pr, struct map *map);
 struct xseg_request *copyup_object(struct peer_req *pr, struct map *map, uint64_t idx);
 void copyup_cb(struct peer_req *pr, struct xseg_request *req);
-struct xseg_request *__object_write(struct peerd *peer, struct peer_req *pr,
-                                    struct map *map, struct mapping *mn);
-struct xseg_request *__load_map_metadata(struct peer_req *pr, struct map *map);
 int load_map_metadata(struct peer_req *pr, struct map *map);
-int delete_map_data(struct peer_req *pr, struct map *map);
 int delete_map(struct peer_req *pr, struct map *map, int delete_data);
+int delete_map_data(struct peer_req *pr, struct map *map);
 int purge_map(struct peer_req *pr, struct map *map);
 int initialize_map_objects(struct map *map);
 struct mapping *get_mapping(struct map *map, uint64_t objindex);
