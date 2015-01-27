@@ -237,37 +237,30 @@ static inline void __get_map(struct map *map)
 
 static inline void put_map(struct map *map)
 {
-    struct mapping *mn;
+    uint64_t i;
+    struct mapping *m;
+
     XSEGLOG2(&lc, D, "Putting map %lx %s. ref %u", map, map->volume, map->ref);
+
     map->ref--;
     if (!map->ref) {
         XSEGLOG2(&lc, I, "Freeing map %s", map->volume);
-        /*
-         * Check that every object is not used by another state thread.
-         * This should always check out, otherwise there is a bug. Since
-         * before a thread can manipulate an object, it must first get
-         * the map, the map ref will never hit zero, while another
-         * thread is using an object.
-         */
-        uint64_t i;
         for (i = 0; i < map->nr_objs; i++) {
-            mn = get_mapping(map, i);
-            if (mn) {
-                //make sure all pending operations on all objects are completed
-                if (mn->state & MF_OBJECT_NOT_READY) {
-                    XSEGLOG2(&lc, E, "BUG: map node in use while freeing map");
-                    wait_on_mapping(mn, mn->state & MF_OBJECT_NOT_READY);
-                }
-//                              mn->state |= MF_OBJECT_DESTROYED;
-                put_mapping(mn);        //matching mn->ref = 1 on mn init
-                put_mapping(mn);        //matching get_mapping;
-                //assert mn->ref == 0;
-                if (mn->ref) {
-                    XSEGLOG2(&lc, E, "BUG: map node ref != 0 after final put");
-                }
-            }
+            // cleanup mapping resources;
+            m = get_mapping(map, i);
+            /*
+             * Check that every object is not used by another state thread.
+             * This should always check out, otherwise there is a bug. Since
+             * before a thread can manipulate an object, it must first get
+             * the map, the map ref will never hit zero, while another
+             * thread is using an object.
+             */
+            // assert(!(m->state & MF_OBJECT_NOT_READY));
+            st_cond_destroy(m->cond);
         }
-        //clean up map
+
+        // clean up map resources
+
         if (map->objects) {
             free(map->objects);
         }
@@ -288,6 +281,7 @@ static inline void put_map(struct map *map)
         st_cond_destroy(map->users_cond);
 
         XSEGLOG2(&lc, I, "Freed map %s", map->volume);
+
         free(map);
     }
 }
