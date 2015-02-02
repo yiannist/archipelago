@@ -167,8 +167,9 @@ class XsegTest(unittest.TestCase):
         ret = XsegTest.get_map_reply(offset, size);
         cnt = ret.cnt
         for i in range(0, cnt):
-            ret.segs[i].target = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-            ret.segs[i].targetlen = len(ret.segs[i].target)
+            ret.segs[i].target = ""
+            ret.segs[i].targetlen = 0
+            ret.segs[i].flags = XF_MAPFLAG_ZERO
         return ret
 
     @staticmethod
