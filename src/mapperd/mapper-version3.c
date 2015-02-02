@@ -33,6 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define V3_OBJECT_WRITABLE 0
 
 #define V3_OBJECT_ZERO_EPOCH (UINT32_MAX)
+#define V3_OBJECT_V1_EPOCH (UINT32_MAX - 1)
 
 #define V3_META_HEADER_SIZE 512
 
@@ -87,6 +88,12 @@ static int is_zero_object(struct v3_object *o)
 {
     return v3_mappings_equal(o, &v3_zero_object);
 }
+
+static int is_v1_object(struct v3_object *o)
+{
+    return o->epoch == V3_OBJECT_V1_EPOCH && o->type == V3_OBJECT_TYPE_ARCHIP;
+}
+
 
 /* Convert fucntions from on disk big-endian representation, to the on memory
  * bit-field based representation
@@ -316,6 +323,14 @@ static int read_object_v3(struct mapping *m, unsigned char *buf)
 
     if (is_zero_object(&mapping)) {
         m->flags |= MF_OBJECT_ZERO;
+    } else if (is_v1_object(&mapping)) {
+        m->flags |= MF_OBJECT_V1;
+        m->flags |= MF_OBJECT_ARCHIP;
+        if (mapping.type == V3_OBJECT_TYPE_ARCHIP) {
+            m->flags |= MF_OBJECT_ARCHIP;
+        }
+        m->vol_epoch = mapping.epoch;
+        m->name_idx = mapping.name_idx;
     } else {
         if (mapping.ro != V3_OBJECT_READONLY) {
             m->flags |= MF_OBJECT_WRITABLE;
@@ -338,6 +353,16 @@ static void object_to_map_v3(unsigned char *buf, struct mapping *m)
 
     if (m->flags & MF_OBJECT_ZERO) {
         mapping = v3_zero_object;
+    } else if (m->flags & MF_OBJECT_V1) {
+        // assert(m->flags & MF_OBJECT_ARCHIP);
+        mapping.type = V3_OBJECT_TYPE_ARCHIP;
+        if (m->flags & MF_OBJECT_WRITABLE) {
+            mapping.ro = V3_OBJECT_WRITABLE;
+        } else {
+            mapping.ro = V3_OBJECT_READONLY;
+        }
+        mapping.epoch = V3_OBJECT_V1_EPOCH;
+        mapping.name_idx = m->name_idx;
     } else {
         if (m->flags & MF_OBJECT_WRITABLE) {
             mapping.ro = V3_OBJECT_WRITABLE;
