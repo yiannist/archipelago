@@ -1475,13 +1475,14 @@ static do_create(struct peer_req *pr, struct map *map)
     if (r >= 0 && !(map->flags & MF_MAP_DELETED)) {
         XSEGLOG2(&lc, E, "Map exists %s", map->volume);
         r = -EEXIST;
-        goto out_close;
+        goto out_restore;
     }
 
+    // Give room for at least once snapshot
     if (map->epoch >= MAX_EPOCH - 1) {
         XSEGLOG2(&lc, E, "Max epoch reached for %s", map->volume);
         r = -ERANGE;
-        goto out_close;
+        goto out_restore;
     }
 
     map->epoch++;
