@@ -478,4 +478,7 @@ int set_req_ctx(struct mapper_io *mio, struct xseg_request *req,
                 struct req_ctx *rctx);
 int remove_req_ctx(struct mapper_io *mio, struct xseg_request *req);
 struct req_ctx * get_req_ctx(struct mapper_io *mio, struct xseg_request *req);
+
+void restore_map_objects(struct map *map);
+void restore_map(struct map *map);
 #endif                          /* end MAPPER_H */

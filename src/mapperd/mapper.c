@@ -266,13 +266,8 @@ static void change_map_volume(struct map *map, char *name, uint32_t namelen)
     map->volumelen = namelen;
 }
 
-static void initialize_map_fields(struct map *map)
+static void initiliaze_map_fields_objects(struct map *map)
 {
-    map->flags = 0;
-    map->epoch = 0;
-    map->nr_objs = 0;
-    map->size = 0;
-    map->blocksize = 0;
     map->objects = NULL;
     map->hex_cas_size = 0;
     map->hex_cas_array_len = 0;
@@ -284,6 +279,38 @@ static void initialize_map_fields(struct map *map)
     map->vol_names = NULL;
     map->cas_array = NULL;
     map->vol_array = NULL;
+}
+
+static void initialize_map_fields_header(struct map *map)
+{
+    map->flags = 0;
+    map->epoch = 0;
+    map->nr_objs = 0;
+    map->size = 0;
+    map->blocksize = 0;
+}
+
+static void initialize_map_fields(struct map *map)
+{
+    initialize_map_fields_header(map);
+    initiliaze_map_fields_objects(map);
+}
+
+void restore_map_objects(struct map *map)
+{
+    free(map->cas_names);
+    free(map->cas_array);
+    free(map->vol_names);
+    free(map->vol_array);
+    free(map->objects);
+
+    initiliaze_map_fields_objects(map);
+}
+
+void restore_map(struct map *map)
+{
+    restore_map_objects(map);
+    initialize_map_fields_header(map);
 }
 
 static struct map *create_map(char *name, uint32_t namelen, uint32_t flags)
