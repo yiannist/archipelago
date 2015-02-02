@@ -1358,8 +1358,6 @@ static int load_map_data_v3(struct peer_req *pr, struct map *map)
 }
 
 struct map_ops v3_ops = {
-    .object_to_map = object_to_map_v3,
-    .read_object = read_object_v3,
     .prepare_write_object = prepare_write_object_v3,
     .load_map_data = load_map_data_v3,
     .write_map_data = write_map_data_v3,
