@@ -175,6 +175,25 @@ int calculate_object_name(char *object, uint32_t *object_len, struct map *map,
         // zero objects should not have names
         // do not call this if object is zero;
         return -EINVAL;
+    } else if (m->flags & MF_OBJECT_V1) {
+        // CAS object
+        char *cas_object;
+
+        cas_object = get_cas_name(map, m->name_idx);
+        if (!cas_object) {
+            return -EINVAL;
+        }
+
+        if (*object_len < MAPPER_PREFIX_LEN + map->hex_cas_size + 1) {
+            return -ERANGE;
+        }
+
+        memcpy(object, MAPPER_PREFIX, MAPPER_PREFIX_LEN);
+        memcpy(object + MAPPER_PREFIX_LEN, cas_object, map->hex_cas_size);
+        object[MAPPER_PREFIX_LEN + map->hex_cas_size] = '\0';
+
+        *object_len = map->hex_cas_size;
+
     } else if (m->flags & MF_OBJECT_ARCHIP) {
         int r;
         uint64_t be_epoch = __cpu_to_be64(m->vol_epoch);
