@@ -92,6 +92,7 @@ static void copy_object_properties(struct mapping *from, struct mapping *to)
         to->flags = 0;
         to->flags |= from->flags & MF_OBJECT_ARCHIP;
         to->flags |= from->flags & MF_OBJECT_WRITABLE;
+        to->flags |= from->flags & MF_OBJECT_V1;
         to->vol_epoch = from->vol_epoch;
         to->name_idx = from->name_idx;
     }
