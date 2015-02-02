@@ -320,17 +320,17 @@ int write_map(struct peer_req *pr, struct map *map)
 int delete_map_data(struct peer_req *pr, struct map *map)
 {
     int r;
-    map->state |= MF_MAP_DELETING_DATA;
     struct mapper_io *mio = __get_mapper_io(pr);
+    map->state |= MF_MAP_DELETING_DATA;
 
-    XSEGLOG2(&lc, I, "Deleting map data for %s", map->volume);
+    XSEGLOG2(&lc, I, "Deleting map data for %s (epoch %llu)", map->volume, map->epoch);
     mio->cb = NULL;
     mio->err = 0;
 
     r = map->mops->delete_map_data(pr, map);
 
     map->state &= ~MF_MAP_DELETING_DATA;
-    XSEGLOG2(&lc, I, "Deleted map data for %s", map->volume);
+    XSEGLOG2(&lc, I, "Deleted map data for %s (epoch %llu)", map->volume, map->epoch);
     return r;
 }
 
