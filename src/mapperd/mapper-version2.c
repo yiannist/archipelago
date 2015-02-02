@@ -18,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <stdlib.h>
 #include <asm/byteorder.h>
 #include <xseg/xseg.h>
+#include <glib.h>
 
 #include "mapper.h"
 #include "mapper-helpers.h"
@@ -26,6 +27,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /* Must be a power of 2, as the blocksize */
 #define v2_chunksize (512*1024)
+
+enum name_type {
+    NAME_TYPE_ZERO, NAME_TYPE_CAS, NAME_TYPE_ARCHIP
+};
 
 /* v2 functions */
 
@@ -147,32 +152,284 @@ static int split_to_chunks(struct map *map, uint64_t start, uint64_t nr,
     return nr_chunks;
 }
 
-
-static int read_object_v2(struct mapping *mn, unsigned char *buf)
+static int read_archip_object_v2(struct map *map, struct mapping *m,
+                                 struct v2_object_on_disk *o)
 {
-    char c = buf[0];
-    int len = 0;
-    uint32_t objectlen;
+    int underscores, i;
+    uint32_t vol_name_len;
+    uint64_t be_epoch, epoch;
+    char * hexlified_epoch, *cas_name, *vol_name;
+    char object_name[v2_max_objectlen + 1];
 
-    mn->flags = 0;
-    mn->flags |= MF_OBJECT_WRITABLE & c;
-    mn->flags |= MF_OBJECT_ARCHIP & c;
-    mn->flags |= MF_OBJECT_ZERO & c;
-    mn->flags |= MF_OBJECT_DELETED & c;
-    objectlen = *(typeof(objectlen) *) (buf + 1);
-    mn->objectlen = objectlen;
-    if (mn->objectlen > v2_max_objectlen) {
-        XSEGLOG2(&lc, D, "mn: %p, buf: %p, objectlen: %u", mn, buf,
-                 mn->objectlen);
-        XSEGLOG2(&lc, E, "Invalid object len %u", mn->objectlen);
-        return -1;
+    memcpy(object_name, o->object, o->objectlen);
+    object_name[o->objectlen] = '\0';
+
+    m->flags = 0;
+
+    m->flags |= MF_OBJECT_ARCHIP;
+    m->flags |= o->flags & MF_OBJECT_WRITABLE;
+
+    // extract volume name from object name
+    // object name is in the form of: volname_hexepoch_hexidx
+    underscores = 0;
+    for (i = o->objectlen - 1; i >= 0; i--) {
+        if (object_name[i] != '_') {
+            continue;
+        }
+        underscores++;
+        if (underscores == 2) {
+            break;
+        }
     }
-//      if (mn->flags & MF_OBJECT_ARCHIP){
-//              strcpy(mn->object, MAPPER_PREFIX);
-//              len += MAPPER_PREFIX_LEN;
-//      }
-    memcpy(mn->object + len, buf + sizeof(objectlen) + 1, mn->objectlen);
-    mn->object[mn->objectlen] = 0;
+
+    if (underscores != 2) {
+        if (strncmp(object_name, MAPPER_PREFIX, MAPPER_PREFIX_LEN) ||
+             o->objectlen != MAPPER_PREFIX_LEN + HEXLIFIED_SHA256_DIGEST_SIZE) {
+            XSEGLOG2(&lc, E, "Could not extract volume name from object %s",
+                     object_name);
+            return -EINVAL;
+        }
+
+        // old v1 name
+        cas_name = object_name + MAPPER_PREFIX_LEN;
+
+        for (i = 0; i < map->cas_nr; i++) {
+            if (!memcmp(map->cas_array + i * HEXLIFIED_SHA256_DIGEST_SIZE,
+                        cas_name, HEXLIFIED_SHA256_DIGEST_SIZE)) {
+                break;
+            }
+        }
+
+        // assert(i<map->cas_nr);
+        if (i >= map->cas_nr) {
+            return -EINVAL;
+        }
+
+        m->flags |= MF_OBJECT_V1;
+        m->vol_epoch = 0;
+        // m->vol_epoch = V3_OBJECT_V1_EPOCH;
+        m->name_idx = i;
+    } else {
+        object_name[i] = '\0';
+        vol_name = object_name;
+        vol_name_len = i;
+        hexlified_epoch = object_name + vol_name_len + 1;
+        hexlified_epoch[HEXLIFIED_EPOCH_LEN] = '\0';
+        epoch = strtoull(hexlified_epoch, NULL, 16);
+
+        // assert(epoch < MAX_EPOCH);
+        if (epoch >= MAX_EPOCH) {
+            XSEGLOG2(&lc, E, "Detected invalid object epoch %llu", epoch);
+            return -EINVAL;
+        }
+
+        for (i = 0; i < map->vol_nr; i++) {
+            if (map->vol_names[i].len == vol_name_len &&
+                    !memcmp(map->vol_names[i].name, vol_name, vol_name_len)) {
+                break;
+            }
+        }
+
+        // assert(i<map->vol_nr);
+        if (i >= map->vol_nr) {
+            return -EINVAL;
+        }
+
+        m->vol_epoch = epoch;
+        m->name_idx = i;
+    }
+
+    return 0;
+}
+
+static int read_cas_object_v2(struct map *map, struct mapping *m,
+                              struct v2_object_on_disk *o)
+{
+    int exists;
+    uint32_t i;
+    char *cas_name;
+
+    m->flags = 0;
+
+    if (o->objectlen != HEXLIFIED_SHA256_DIGEST_SIZE) {
+        XSEGLOG2(&lc, E, "Invalid object len %u for CA object",
+                o->objectlen);
+        return -EINVAL;
+    }
+
+    cas_name = o->object;
+
+    for (i = 0; i < map->cas_nr; i++) {
+        if (!memcmp(map->cas_array + i * HEXLIFIED_SHA256_DIGEST_SIZE,
+                    cas_name, HEXLIFIED_SHA256_DIGEST_SIZE)) {
+            break;
+        }
+    }
+    // assert(i<map->cas_nr);
+    if (i >= map->cas_nr) {
+        return -EINVAL;
+    }
+
+    m->name_idx = i;
+    m->vol_epoch = 0;
+
+    return 0;
+}
+
+static int read_object_v2(struct map *map, struct mapping *m, unsigned char *buf)
+{
+    int r;
+    struct v2_object_on_disk *object;
+
+    object = (struct v2_object_on_disk *)buf;
+
+    if (object->objectlen > v2_max_objectlen) {
+        XSEGLOG2(&lc, E, "Invalid object len %u", object->objectlen);
+        return -EINVAL;
+    }
+
+    m->flags = 0;
+    if (object->flags & MF_OBJECT_ZERO) {
+        m->flags = MF_OBJECT_ZERO;
+        return;
+    }
+
+
+    if (object->flags & MF_OBJECT_ARCHIP) {
+        r = read_archip_object_v2(map, m, object);
+    } else {
+        r = read_cas_object_v2(map, m, object);
+    }
+
+    return 0;
+}
+
+static int extract_archip_name_v2(struct v2_object_on_disk *o,
+                                  enum name_type *type, char **name)
+{
+    int underscores, i;
+    char object_name[v2_max_objectlen + 1];
+
+    memcpy(object_name, o->object, o->objectlen);
+    object_name[o->objectlen] = '\0';
+
+    // extract volume name from object name
+    // object name is in the form of: volname_hexepoch_hexidx
+    underscores = 0;
+    for (i = o->objectlen - 1; i >= 0; i--) {
+        if (object_name[i] != '_') {
+            continue;
+        }
+        underscores++;
+        if (underscores == 2) {
+            break;
+        }
+    }
+
+    if (underscores != 2) {
+        if (strncmp(object_name, MAPPER_PREFIX, MAPPER_PREFIX_LEN) ||
+             o->objectlen != MAPPER_PREFIX_LEN + HEXLIFIED_SHA256_DIGEST_SIZE) {
+            XSEGLOG2(&lc, E, "Could not extract volume name from object %s",
+                     object_name);
+            return -EINVAL;
+        }
+        // old v1 name
+        *type = NAME_TYPE_CAS;
+        *name = strndup(object_name + MAPPER_PREFIX_LEN, HEXLIFIED_SHA256_DIGEST_SIZE);
+    } else {
+        *type = NAME_TYPE_ARCHIP;
+        *name = strndup(object_name, i);
+    }
+
+    if (!*name) {
+        return -ENOMEM;
+    }
+
+    return 0;
+}
+
+static int extract_cas_name_v2(struct v2_object_on_disk *o,
+                               enum name_type *type, char **name)
+{
+    uint32_t i;
+    char *cas_name;
+
+    if (o->objectlen != HEXLIFIED_SHA256_DIGEST_SIZE) {
+        XSEGLOG2(&lc, E, "Invalid object len %u for CA object",
+                 o->objectlen);
+        return -EINVAL;
+    }
+
+    *name = strndup(o->object, HEXLIFIED_SHA256_DIGEST_SIZE);
+    if (!*name) {
+        return -ENOMEM;
+    }
+    *type = NAME_TYPE_CAS;
+
+    return 0;
+}
+
+static int extract_name_from_object(struct v2_object_on_disk *o,
+                                    enum name_type *type, char **name)
+{
+    int r;
+
+    *name = NULL;
+
+    if (o->objectlen > v2_max_objectlen) {
+        XSEGLOG2(&lc, E, "Invalid object len %u", o->objectlen);
+        return -EINVAL;
+    }
+
+    if (o->flags & MF_OBJECT_ZERO) {
+        *type = NAME_TYPE_ZERO;
+        return 0;
+    }
+
+    if (o->flags & MF_OBJECT_ARCHIP) {
+        r = extract_archip_name_v2(o, type, name);
+    } else {
+        r = extract_cas_name_v2(o, type, name);
+    }
+
+    return r;
+}
+
+static int extract_names(struct map *map, unsigned char *buf,
+                         GHashTable *cas_names, GHashTable *vol_names)
+{
+    int r;
+    uint64_t i, pos = 0;
+    char *name;
+    enum name_type type;
+    GHashTable *ht;
+
+    for (i = 0; i < map->nr_objs; i++) {
+        r = extract_name_from_object((struct v2_object_on_disk *)(buf + pos),
+                                     &type, &name);
+        if (r < 0) {
+            return r;
+        }
+
+        pos += v2_objectsize_in_map;
+
+        if (type == NAME_TYPE_ZERO) {
+            continue;
+        }
+
+        if (!name) {
+            return -EINVAL;
+        }
+
+        if (type == NAME_TYPE_CAS) {
+            g_hash_table_add(cas_names, name);
+        } else if (type == NAME_TYPE_ARCHIP) {
+            g_hash_table_add(vol_names, name);
+        } else {
+            // asssert(0);
+            return -EINVAL;
+        }
+    }
 
     return 0;
 }
@@ -180,26 +437,6 @@ static int read_object_v2(struct mapping *mn, unsigned char *buf)
 /* Fill a buffer representing an object on disk from a given map node */
 static void object_to_map_v2(unsigned char *buf, struct mapping *mn)
 {
-    struct v2_object_on_disk *object;
-
-    //_Static_assert(typeof(mn->objectlen), typeof(object->objectlen));
-    if (mn->objectlen > v2_max_objectlen) {
-        XSEGLOG2(&lc, E, "Invalid object len %u", mn->objectlen);
-        mn->objectlen = v2_max_objectlen;
-    }
-
-    memset(buf, 0, v2_objectsize_in_map);
-    object = (struct v2_object_on_disk *) buf;
-
-    object->flags = 0;
-    object->flags |= mn->flags & MF_OBJECT_WRITABLE;
-    object->flags |= mn->flags & MF_OBJECT_ARCHIP;
-    object->flags |= mn->flags & MF_OBJECT_ZERO;
-    object->flags |= mn->flags & MF_OBJECT_DELETED;
-
-
-    object->objectlen = mn->objectlen;
-    memcpy(object->object, mn->object, object->objectlen);
 }
 
 static struct xseg_request *prepare_write_chunk(struct peer_req *pr,
@@ -303,75 +540,161 @@ struct xseg_request *prepare_write_objects_v2(struct peer_req *pr,
 
 static struct xseg_request *prepare_write_object_v2(struct peer_req *pr,
                                                     struct map *map,
+                                                    uint64_t obj_idx,
                                                     struct mapping *mn)
 {
-    struct peerd *peer = pr->peer;
-    char *data;
-    struct xseg_request *req;
-
-    req = prepare_write_objects_v2(pr, map, mn->objectidx, 1);
-    if (!req) {
-        return NULL;
-    }
-    data = xseg_get_data(peer->xseg, req);
-    object_to_map_v2((unsigned char *) data, mn);
-    return req;
+    return NULL;
 }
 
 
-int read_map_objects_v2(struct map *map, unsigned char *data, uint64_t start,
-                        uint64_t nr)
+int read_map_objects_v2(struct map *map, unsigned char *data)
 {
     int r;
     struct mapping *mapping;
-    uint64_t i;
-    uint64_t pos = 0;
+    char *vol_name, *cas_name;
+    uint32_t vol_name_len;
+    uint64_t i, vol_name_sum, pos = 0;
+    GHashTable *cas_names = NULL, *vol_names = NULL;
+    GHashTableIter iter;
+    gpointer key, value;
 
-    if (start + nr > map->nr_objs) {
-        return -1;
+    XSEGLOG2(&lc, D, "Allocating %llu nr_objs for size %llu",
+             map->nr_objs, map->size);
+
+    mapping = calloc(map->nr_objs, sizeof(struct mapping));
+    if (!mapping) {
+        XSEGLOG2(&lc, E, "Cannot allocate mem for %llu objects",
+                 map->nr_objs);
+        return -ENOMEM;
     }
 
-    if (!map->objects) {
-        XSEGLOG2(&lc, D, "Allocating %llu nr_objs for size %llu",
-                 map->nr_objs, map->size);
-        mapping = calloc(map->nr_objs, sizeof(struct mapping));
-        if (!mapping) {
-            XSEGLOG2(&lc, E, "Cannot allocate mem for %llu objects",
-                     map->nr_objs);
-            return -1;
+    map->objects = mapping;
+    r = initialize_map_objects(map);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Cannot initialize map objects for map %s",
+                map->volume);
+        goto out_err;
+    }
+
+
+    // find cas and vol names;
+    cas_names = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
+    vol_names = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
+    if (!cas_names || !vol_names) {
+        r = -ENOMEM;
+        goto out_err;
+    }
+
+    r = extract_names(map, data, cas_names, vol_names);
+    if (r < 0) {
+        goto out_err;
+    }
+
+    if (!g_hash_table_contains(vol_names, map->volume)) {
+        vol_name = strndup(map->volume, map->volumelen);
+        if (!vol_name) {
+            r = -ENOMEM;
+            goto out_err;
         }
-        map->objects = mapping;
-        r = initialize_map_objects(map);
-        if (r < 0) {
-            XSEGLOG2(&lc, E, "Cannot initialize map objects for map %s",
-                     map->volume);
-            goto out_free;
+        g_hash_table_add(vol_names, vol_name);
+        vol_name = NULL;
+    }
+
+    vol_name_sum = 0;
+
+    g_hash_table_iter_init (&iter, vol_names);
+    while (g_hash_table_iter_next (&iter, &key, &value))
+    {
+        vol_name = (char *)key;
+        vol_name_sum += strlen(key);
+    }
+
+    map->cas_nr = g_hash_table_size(cas_names);
+    map->vol_nr = g_hash_table_size(vol_names);
+
+    map->hex_cas_size = HEXLIFIED_SHA256_DIGEST_SIZE;
+    map->hex_cas_array_len = map->cas_nr * HEXLIFIED_SHA256_DIGEST_SIZE;
+
+    map->vol_array_len = map->vol_nr * sizeof(uint16_t) + vol_name_sum;
+
+    if (map->cas_nr > 0) {
+        map->cas_array = calloc(1, map->cas_nr * HEXLIFIED_SHA256_DIGEST_SIZE);
+        map->cas_names = calloc(map->cas_nr, sizeof(char *));
+        if (!map->cas_array || !map->cas_names) {
+            r = -ENOMEM;
+            goto out_err;
         }
+
+        i = 0;
+        g_hash_table_iter_init(&iter, cas_names);
+        while (g_hash_table_iter_next(&iter, &key, &value))
+        {
+            cas_name = (char *)key;
+
+            memcpy(map->cas_array + i * map->hex_cas_size, cas_name,
+                   map->hex_cas_size);
+            map->cas_names[i] = map->cas_array + i * map->hex_cas_size;
+            i++;
+        }
+        // assert(i == map->cas_nr);
+    }
+
+    map->vol_array = calloc(1, vol_name_sum);
+    map->vol_names = calloc(map->vol_nr, sizeof(struct vol_idx));
+    if (!map->vol_names || !map->vol_array) {
+        r = -ENOMEM;
+        goto out_err;
+    }
+
+    i = 0;
+    vol_name_sum = 0;
+    g_hash_table_iter_init(&iter, vol_names);
+    while (g_hash_table_iter_next(&iter, &key, &value))
+    {
+        vol_name = (char *)key;
+        vol_name_len = strlen(key);
+
+        memcpy(map->vol_array+vol_name_sum, vol_name, vol_name_len);
+
+        map->vol_names[i].len = vol_name_len;
+        map->vol_names[i].name = map->vol_array + vol_name_sum;
+
+        if (!strncmp(vol_name, map->volume, vol_name_len)) {
+            map->cur_vol_idx = i;
+        }
+
+        vol_name_sum += vol_name_len;
+        i++;
     }
 
     mapping = map->objects;
 
-    for (i = start; i < nr; i++) {
-        r = read_object_v2(&mapping[i], data + pos);
+    for (i = 0; i < map->nr_objs; i++) {
+        r = read_object_v2(map, &mapping[i], data + pos);
         if (r < 0) {
-            XSEGLOG2(&lc, E, "Map %s: Could not read object %llu",
+            XSEGLOG2(&lc, E, "Map %s: could not read object %llu",
                      map->volume, i);
-            goto out_free;
+            goto out_err;
         }
         pos += v2_objectsize_in_map;
     }
-    return 0;
 
-  out_free:
-    free(map->objects);
-    map->objects = NULL;
-    return -1;
-}
+    r = 0;
 
-static int read_map_v2(struct map *m, unsigned char *data)
-{
-    /* totally unsafe */
-    return read_map_objects_v2(m, data, 0, m->nr_objs);
+out:
+    if (vol_names) {
+        g_hash_table_destroy(vol_names);
+    }
+
+    if (cas_names) {
+        g_hash_table_destroy(cas_names);
+    }
+
+    return r;
+
+out_err:
+    restore_map_objects(map);
+    goto out;
 }
 
 static void delete_map_data_v2_cb(struct peer_req *pr,
@@ -558,7 +881,18 @@ static void load_map_data_v2_cb(struct peer_req *pr, struct xseg_request *req)
     unsigned char *buf;
     struct mapper_io *mio = __get_mapper_io(pr);
     struct peerd *peer = pr->peer;
-    buf = (unsigned char *) __get_node(mio, req);
+    struct req_ctx *req_ctx = NULL;
+
+    req_ctx = get_req_ctx(mio, req);
+    if (!req_ctx) {
+        XSEGLOG2(&lc, E, "Cannot get request context");
+        mio->err = 1;
+        goto out;
+    }
+
+    remove_req_ctx(mio, req);
+
+    buf = req_ctx->buf;
 
     XSEGLOG2(&lc, I, "Callback of req %p, buf: %p", req, buf);
 
@@ -585,8 +919,8 @@ static void load_map_data_v2_cb(struct peer_req *pr, struct xseg_request *req)
     XSEGLOG2(&lc, D, "Memcpy %llu to %p from (%p)", req->serviced, buf, data);
     memcpy(buf, data, req->serviced);
 
-  out:
-    __set_node(mio, req, NULL);
+out:
+    free(req_ctx);
     put_request(pr, req);
     mio->pending_reqs--;
     signal_pr(pr);
@@ -604,6 +938,7 @@ static int __load_map_objects_v2(struct peer_req *pr, struct map *map,
     struct xseg_request *req;
     struct chunk *chunk;
     int nr_chunks, i;
+    struct req_ctx *req_ctx;
 
     unsigned char *obuf = buf;
 
@@ -626,18 +961,35 @@ static int __load_map_objects_v2(struct peer_req *pr, struct map *map,
         XSEGLOG2(&lc, D, "Reading chunk %s(%u) , start %llu, nr :%llu",
                  chunk[i].target, chunk[i].targetlen,
                  chunk[i].start, chunk[i].nr);
-        r = __set_node(mio, req, (struct mapping *) (buf));
+
+        req_ctx = calloc(1, sizeof(struct req_ctx));
+        if (!req_ctx) {
+            r = -ENOMEM;
+            goto out_put;
+        }
+
+        req_ctx->buf = buf;
+
+        r = set_req_ctx(mio, req, req_ctx);
+        if (r < 0) {
+            XSEGLOG2(&lc, E, "Cannot set request ctx");
+            goto out_put;
+        }
+
         XSEGLOG2(&lc, D, "Send buf: %p, offset from start: %d, "
                  "nr_objs: %d", buf, buf - obuf,
                  (buf - obuf) / v2_objectsize_in_map);
+
         buf += chunk[i].nr * v2_objectsize_in_map;
+
         XSEGLOG2(&lc, D, "Next buf: %p, offset from start: %d, "
                  "nr_objs: %d", buf, buf - obuf,
                  (buf - obuf) / v2_objectsize_in_map);
+
         r = send_request(pr, req);
         if (r < 0) {
             XSEGLOG2(&lc, E, "Cannot send request");
-            goto out_put;
+            goto out_unset_ctx;
         }
         mio->pending_reqs++;
     }
@@ -645,13 +997,16 @@ static int __load_map_objects_v2(struct peer_req *pr, struct map *map,
     free(chunk);
     return 0;
 
-  out_put:
+out_unset_ctx:
+    remove_req_ctx(mio, req);
+    free(req_ctx);
+out_put:
     put_request(pr, req);
-  out_free:
+out_free:
     free(chunk);
-  out_err:
+out_err:
     mio->err = 1;
-    return -1;
+    return r;
 }
 
 static int load_map_objects_v2(struct peer_req *pr, struct map *map,
@@ -670,7 +1025,7 @@ static int load_map_objects_v2(struct peer_req *pr, struct map *map,
     buf = calloc(nr, sizeof(unsigned char) * v2_objectsize_in_map);
     if (!buf) {
         XSEGLOG2(&lc, E, "Cannot allocate memory");
-        return -1;
+        return -ENOMEM;
     }
 
     mio->priv = buf;
@@ -690,11 +1045,13 @@ static int load_map_objects_v2(struct peer_req *pr, struct map *map,
         XSEGLOG2(&lc, E, "Error issuing load request");
         goto out;
     }
+
     XSEGLOG2(&lc, D, "Loaded mapdata. Proceed to reading");
-    r = read_map_objects_v2(map, buf, start, nr);
+    r = read_map_objects_v2(map, buf);
     if (r < 0) {
         mio->err = 1;
     }
+
   out:
     free(buf);
     mio->priv = NULL;
@@ -708,8 +1065,6 @@ static int load_map_data_v2(struct peer_req *pr, struct map *map)
 }
 
 struct map_ops v2_ops = {
-    .object_to_map = object_to_map_v2,
-    .read_object = read_object_v2,
     .prepare_write_object = prepare_write_object_v2,
     .load_map_data = load_map_data_v2,
     .write_map_data = write_map_data_v2,
