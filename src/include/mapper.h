@@ -113,8 +113,6 @@ struct map;
 struct mapping;
 /* Map I/O ops */
 struct map_ops {
-    void (*object_to_map) (unsigned char *buf, struct mapping * mn);
-    int (*read_object) (struct mapping * mn, unsigned char *buf);
     struct xseg_request *(*prepare_write_object) (struct peer_req * pr,
                                                   struct map * map,
                                                   uint64_t obj_idx,
