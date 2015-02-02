@@ -1336,92 +1336,83 @@ static int truncate_map(struct peer_req *pr, struct map *map, uint64_t offset)
 {
     struct peerd *peer = pr->peer;
     struct mapper_io *mio = __get_mapper_io(pr);
-    struct mapping *mn;
-    uint64_t nr_objs, old_nr_objs;
+    struct mapping *m, *mappings = NULL;
+    uint64_t i, nr_objs;
     int r;
+    struct map prev_map = *map;
 
     if (!(map->state & MF_MAP_EXCLUSIVE)) {
         XSEGLOG2(&lc, E, "Map was not opened exclusively");
         return -1;
     }
+
     XSEGLOG2(&lc, I, "Starting truncation for map %s", map->volume);
     map->state |= MF_MAP_TRUNCATING;
 
-    wait_all_map_objects_ready(map);
-
-    old_nr_objs = map->nr_objs;
+    map->epoch++;
     nr_objs = __calc_map_obj(offset, map->blocksize);
 
-    /* If new volume size is larger than the old one
+    /*
+     * If new volume size is larger than the old one
      * extend mapfile with zero blocks.
      */
-    if (nr_objs > old_nr_objs) {
-        struct mapping *mappings = calloc(nr_objs, sizeof(struct mapping));
+    if (nr_objs > map->nr_objs) {
+        mappings = calloc(nr_objs, sizeof(struct mapping));
         if (!mappings) {
+            r = -ENOMEM;
             XSEGLOG2(&lc, E, "Cannot allocate %llu nr_objs", nr_objs);
-            goto out_unset;
+            goto out;
         }
-        uint64_t i;
-        for (i = 0; i < old_nr_objs; i++) {
-            mn = get_mapping(map, i);
-            if (mn) {
-                strncpy(mappings[i].object, mn->object, mn->objectlen);
-                mappings[i].objectlen = mn->objectlen;
-                mappings[i].flags = 0;
-                if (mn->flags & MF_OBJECT_ARCHIP) {
-                    mappings[i].flags |= MF_OBJECT_ARCHIP;
-                }
-                if (mn->flags & MF_OBJECT_ZERO) {
-                    mappings[i].flags |= MF_OBJECT_ZERO;
-                }
-                put_mapping(mn);
-            } else {
-                strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
-                mappings[i].objectlen = ZERO_BLOCK_LEN;
-                mappings[i].flags = MF_OBJECT_ZERO;
-            }
-            mappings[i].object[mappings[i].objectlen] = 0;
-            mappings[i].state = 0;
-            mappings[i].objectidx = i;
-            mappings[i].map = map;
-            mappings[i].ref = 1;
-            mappings[i].waiters = 0;
-            mappings[i].cond = st_cond_new();
+        map->objects = mappings;
+        map->nr_objs = nr_objs;
+        initialize_map_objects(map);
+
+        for (i = 0; i < prev_map.nr_objs; i++) {
+            m = get_mapping(map, i);
+            copy_object_properties(m, &mappings[i]);
         }
 
-        for (i = old_nr_objs; i < nr_objs; i++) {
-            strncpy(mappings[i].object, zero_block, ZERO_BLOCK_LEN);
-            mappings[i].objectlen = ZERO_BLOCK_LEN;
+        for (i = prev_map.nr_objs; i < nr_objs; i++) {
             mappings[i].flags = MF_OBJECT_ZERO;
-            mappings[i].object[mappings[i].objectlen] = 0;
-            mappings[i].state = 0;
-            mappings[i].objectidx = i;
-            mappings[i].map = map;
-            mappings[i].ref = 1;
-            mappings[i].waiters = 0;
-            mappings[i].cond = st_cond_new();
         }
-        free(map->objects);
-        map->objects = mappings;
     }
+
     map->size = offset;
     map->nr_objs = nr_objs;
 
     r = write_map(pr, map);
     if (r < 0) {
+        map->size = prev_map.size;
+        map->nr_objs = prev_map.nr_objs;
+        map->epoch = prev_map.epoch;
+        map->objects = prev_map.objects;
+
+        prev_map.objects = NULL;
+
         XSEGLOG2(&lc, E, "Cannot write map %s", map->volume);
-        goto out_unset;
+        goto out;
     }
+
+    // delete previous map data
+    r = delete_map_data(pr, &prev_map);
+    if (r < 0) {
+        XSEGLOG2(&lc, W, "Could not delete map data for map %s (epoch: %llu)",
+                 prev_map.volume, prev_map.epoch);
+    }
+
     XSEGLOG2(&lc, I, "Map %s truncated", map->volume);
+    r = 0;
 
+out:
+    free(mappings);
     map->state &= ~MF_MAP_TRUNCATING;
-    XSEGLOG2(&lc, I, "Truncation of %s completed ", map->volume);
-    return 0;
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Truncation for map %s failed ", map->volume);
+    } else {
+        XSEGLOG2(&lc, I, "Truncation of %s completed ", map->volume);
+    }
 
-  out_unset:
-    map->state &= ~MF_MAP_TRUNCATING;
-    XSEGLOG2(&lc, E, "Truncation for map %s failed ", map->volume);
-    return -1;
+    return r;
 }
 
 
