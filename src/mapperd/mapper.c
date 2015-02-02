@@ -1805,6 +1805,9 @@ struct map *get_map(struct peer_req *pr, char *name, uint32_t namelen,
                          map->volume);
                 do_close(pr, map);
                 dropcache(pr, map);
+                // We can do this, because there are no objects loaded for
+                // deleted maps.
+                restore_map(map);
                 signal_map(map);
                 put_map(map);
                 return NULL;
