@@ -14,11 +14,17 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 cmake_minimum_required(VERSION 2.8)
+INCLUDE(FindPkgConfig)
 
 project (archipelago_peers)
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include")
 add_subdirectory(poold)
+
+pkg_check_modules(GLIB REQUIRED glib-2.0>=2.0.0)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${GLIB_INCLUDE_DIRS})
+link_directories(${GLIB_LIBRARY_DIRS})
 
 set(DUMMY_SRC dummy/dummy.c peer.c)
 add_executable(archip-dummy ${DUMMY_SRC})
@@ -62,10 +68,10 @@ add_executable(archip-vlmcd ${VLMCD_SRC})
 target_link_libraries(archip-vlmcd xseg)
 
 set(MAPPERD_SRC mapperd/mapper.c peer.c util/hash.c mapperd/mapper-handling.c
-    mapperd/mapper-version0.c mapperd/mapper-version1.c
-    mapperd/mapper-version2.c mapperd/mapper-helpers.c)
+    mapperd/mapper-version3.c mapperd/mapper-helpers.c
+    mapperd/mapper-version0.c mapperd/mapper-version2.c)
 add_executable(archip-mapperd ${MAPPERD_SRC})
-target_link_libraries(archip-mapperd xseg st crypto)
+target_link_libraries(archip-mapperd xseg st crypto ${GLIB_LIBRARIES})
 set_target_properties(archip-mapperd
 	PROPERTIES
 	COMPILE_DEFINITIONS "ST_THREADS"
