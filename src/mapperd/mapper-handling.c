@@ -222,9 +222,8 @@ struct xseg_request *__write_map_metadata(struct peer_req *pr, struct map *map)
         header_size = v0_mapheader_size;
         break;
     case MAP_V1:
-        write_map_header_v1(map, (struct v1_header_struct *) &hdr);
-        header_size = v1_mapheader_size;
-        break;
+        XSEGLOG2(&lc, E, "Mapfile version 1 is deprecated and no longer supported");
+        goto out_err;
     case MAP_V2:
         write_map_header_v2(map, (struct v2_header_struct *) &hdr);
         header_size = v2_mapheader_size;
@@ -530,7 +529,8 @@ int load_map_metadata(struct peer_req *pr, struct map *map)
         r = read_map_header_v0(map, (struct v0_header_struct *) data);
         break;
     case MAP_V1:
-        r = read_map_header_v1(map, (struct v1_header_struct *) data);
+        XSEGLOG2(&lc, E, "Mapfile version 1 is deprecated and no longer supported");
+        r = -ENOTSUP;
         break;
     case MAP_V2:
         r = read_map_header_v2(map, (struct v2_header_struct *) data);
