@@ -625,6 +625,7 @@ int load_map(struct peer_req *pr, struct map *map)
   out_err:
     XSEGLOG2(&lc, E, "Loading of map %s failed", map->volume);
     map->state &= ~MF_MAP_LOADING;
+    restore_map(map);
     return -1;
 }
 
