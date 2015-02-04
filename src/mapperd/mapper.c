@@ -845,7 +845,7 @@ static int do_destroy(struct peer_req *pr, struct map *map)
                  && mn->flags & MF_OBJECT_WRITABLE)) {
             //only remove writable archipelago objects.
             //skip already deleted
-            XSEGLOG2(&lc, D, "Skipping object %llu", i);
+            //XSEGLOG2(&lc, D, "Skipping object %llu", i);
             continue;
         }
         XSEGLOG2(&lc, D, "%llu flags:\n  Writable: %s\n  Zero: %s\n"
