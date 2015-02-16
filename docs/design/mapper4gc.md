@@ -19,10 +19,15 @@ Snapshoting is the act of taking a copy of a state of a volume.
 1. Lock map (src) & snap_map (dst) (XXX: Already locked with MF_EXCLUSIVE flag!)
 2. Message GC queue: [RO -> RO+1, RW -> RW+2]
 3. Write src epoch'
+
     |--> on fail: Message GC queue: [RO-1, RW-2]
-           |--> on fail: Abort (STALE OBJECTS!)
+
+    |--> on fail: Abort (STALE OBJECTS!)
+
 4. Write dst epoch''
-     |--> on fail: Message GC queue: [RO-1, RW-2]
+
+    |--> on fail: Message GC queue: [RO-1, RW-2]
+
 5. Unlock map & snap_map
 6. Continue
 ```
@@ -39,11 +44,17 @@ object.
 
 1. Lock dst
 2. Create new object
-     |--> on fail: Abort w/ IO error
+
+    |--> on fail: Abort w/ IO error
+
 3. Update map
-     |--> on fail: Abort w/ IO error
+
+    |--> on fail: Abort w/ IO error
+
 4. Message GC queue: [RO-1]
-     |--> on fail: Log (STALE RO OBJECT!)
+
+    |--> on fail: Log (STALE RO OBJECT!)
+
 5. Unlock dst
 6. Continue
 ```
@@ -60,10 +71,15 @@ Cloning is the creation of a RO volume from a snapshot.
 
 1. Lock map (parent) & clone_map (dst)
 2. Message GC queue: [RO+1] for overlapped size
-     |--> on fail: Abort
+
+    |--> on fail: Abort
+
 3. Write dst epoch'
-     |--> on fail: Message GC queue: [RO-1]
-            |--> on fail: Abort and Log (STALE OBJECTS!)
+
+    |--> on fail: Message GC queue: [RO-1]
+
+    |--> on fail: Abort and Log (STALE OBJECTS!)
+
 4. Unlock map & clone_map
 5. Continue
 ```
@@ -80,10 +96,15 @@ Composition is the creation of a new Pithos volume.
 
 1. Lock map
 2. Message GC queue: [RO+1]CAS
-     |--> on fail: Abort
+
+    |--> on fail: Abort
+
 3. Write map
-     |--> on fail: Message GC queue: [RO-1]CAS
-            |--> on fail: Abort and Log (STALE OBJECTS!)
+
+    |--> on fail: Message GC queue: [RO-1]CAS
+
+    |--> on fail: Abort and Log (STALE OBJECTS!)
+
 4. Unlock map
 5. Continue
 ```
@@ -97,9 +118,13 @@ Deletion of a map (=> deletion of a volume).
 
 1. Lock map
 2. Mark map as 'deleted'
-     |--> on fail: Abort
+
+    |--> on fail: Abort
+
 3. Message GC queue: ?
-     |--> on fail: Log (STALE OBJECTS!)
+
+    |--> on fail: Log (STALE OBJECTS!)
+
 4. Unlock map
 5. Continue
 ```
