@@ -67,6 +67,21 @@ dispatch_accepted : 2152 -> handle_clone : 1937
 -> write_clone : 1129 (MF_CREATE | MF_EXCLUSIVE) (XXX: Asserts dst lock)
 
 ## COMPOSE (X_CREATE)
+
+Composition is the creation of a new Pithos volume.
+
+1) Lock map
+2) Message GC queue: [RO+1]CAS
+     |--> on fail: Abort
+3) Write map
+     |--> on fail: Message GC queue: [RO-1]CAS
+            |--> on fail: Abort and Log (STALE OBJECTS!)
+4) Unlock map
+5) Continue
+
+dispatch_accepted : 2152 -> handle_create : 1968
+-> do_compose : 1574 (MF_CREATE | MF_EXCLUSIVE) (XXX: Asserts map lock)
+
 ## REMOVE (X_DELETE)
 
 --
