@@ -22,7 +22,7 @@ Snapshoting is the act of taking a copy of a state of a volume.
 
     |--> on fail: Message GC queue: [RO-1, RW-2]
 
-    |--> on fail: Abort (STALE OBJECTS!)
+    |--> on fail: Abort (_STALE OBJECTS!_)
 
 4. Write dst epoch''
 
@@ -53,7 +53,7 @@ object.
 
 4. Message GC queue: [RO-1]
 
-    |--> on fail: Log (STALE RO OBJECT!)
+    |--> on fail: Log (_STALE RO OBJECT!_)
 
 5. Unlock dst
 6. Continue
@@ -78,7 +78,7 @@ Cloning is the creation of a RO volume from a snapshot.
 
     |--> on fail: Message GC queue: [RO-1]
 
-    |--> on fail: Abort and Log (STALE OBJECTS!)
+    |--> on fail: Abort and Log (_STALE OBJECTS!_)
 
 4. Unlock map & clone_map
 5. Continue
@@ -103,7 +103,7 @@ Composition is the creation of a new Pithos volume.
 
     |--> on fail: Message GC queue: [RO-1]CAS
 
-    |--> on fail: Abort and Log (STALE OBJECTS!)
+    |--> on fail: Abort and Log (_STALE OBJECTS!_)
 
 4. Unlock map
 5. Continue
@@ -123,7 +123,7 @@ Deletion of a map (=> deletion of a volume).
 
 3. Message GC queue: ?
 
-    |--> on fail: Log (STALE OBJECTS!)
+    |--> on fail: Log (_STALE OBJECTS!_)
 
 4. Unlock map
 5. Continue
