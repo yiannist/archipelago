@@ -84,6 +84,21 @@ dispatch_accepted : 2152 -> handle_create : 1968
 
 ## REMOVE (X_DELETE)
 
+Deletion of a map (=> deletion of a volume).
+
+1) Lock map
+2) Mark map as 'deleted'
+     |--> on fail: Abort
+3) Message GC queue: ?
+     |--> on fail: Log (STALE OBJECTS!)
+4) Unlock map
+5) Continue
+
+dispatch_accepted : 2152 -> handle_destroy : 2018
+-> do_destroy : 798 (MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE) (XXX: Asserts map lock)
+(-> object_delete)
+(-> delete_map)
+
 --
 NOTES:
 - map_action(action, pr, name, namelen, flags) : 1896 (XXX: Does the locking!)
