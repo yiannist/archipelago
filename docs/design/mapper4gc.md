@@ -9,6 +9,7 @@ Creation of a new volume. No object updates => No GC action.
 
 dispatch_accepted : 2152 -> handle_clone : 1937
 -> do_create : 1437 (MF_CREATE | MF_EXCLUSIVE)
+(-> write_map)
 
 ## SNAPSHOT (X_SNAPSHOT)
 
@@ -27,6 +28,7 @@ Snapshoting is the act of taking a copy of a state of a volume.
 dispatch_accepted : 2152 -> handle_snapshot : 2067
 -> do_snapshot : 737 (MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE) (XXX: Asserts src lock)
 -> write_snapshot : 626 (MF_CREATE | MF_EXCLUSIVE) (XXX: Asserts dst lock)
+(-> write_map)
 
 ## COPY-UP (X_MAPW)
 
@@ -47,6 +49,7 @@ dispatch_accepted : 2152 -> handle_mapw : 2002
 -> do_mapw : 1099 (MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE | MF_FORCE) (XXX: Asserts dst lock)
 -> req2objs : 444
 -> do_copyups : 361
+(-> write_map)
 
 ## CLONE (X_CLONE w/ origin)
 
@@ -65,6 +68,7 @@ dispatch_accepted : 2152 -> handle_clone : 1937
 -> do_clone : 1312 (MF_LOAD | MF_ARCHIP) (XXX: Asserts src lock)
 (-> create_map : 316 (MF_ARCHIP))
 -> write_clone : 1129 (MF_CREATE | MF_EXCLUSIVE) (XXX: Asserts dst lock)
+(-> write_map)
 
 ## COMPOSE (X_CREATE)
 
