@@ -49,6 +49,23 @@ dispatch_accepted : 2152 -> handle_mapw : 2002
 -> do_copyups : 361
 
 ## CLONE (X_CLONE w/ origin)
+
+Cloning is the creation of a RO volume from a snapshot.
+
+1) Lock map (parent) & clone_map (dst)
+2) Message GC queue: [RO+1] for overlapped size
+     |--> on fail: Abort
+3) Write dst epoch'
+     |--> on fail: Message GC queue: [RO-1]
+            |--> on fail: Abort and Log (STALE OBJECTS!)
+4) Unlock map & clone_map
+5) Continue
+
+dispatch_accepted : 2152 -> handle_clone : 1937
+-> do_clone : 1312 (MF_LOAD | MF_ARCHIP) (XXX: Asserts src lock)
+(-> create_map : 316 (MF_ARCHIP))
+-> write_clone : 1129 (MF_CREATE | MF_EXCLUSIVE) (XXX: Asserts dst lock)
+
 ## COMPOSE (X_CREATE)
 ## REMOVE (X_DELETE)
 
