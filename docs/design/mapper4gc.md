@@ -29,6 +29,25 @@ dispatch_accepted : 2152 -> handle_snapshot : 2067
 -> write_snapshot : 626 (MF_CREATE | MF_EXCLUSIVE) (XXX: Asserts dst lock)
 
 ## COPY-UP (X_MAPW)
+
+Copy-up is a CoW operation. It takes place when the mapper has to write to RO
+object.
+
+1) Lock dst
+2) Create new object
+     |--> on fail: Abort w/ IO error
+3) Update map
+     |--> on fail: Abort w/ IO error
+4) Message GC queue: [RO-1]
+     |--> on fail: Log (STALE RO OBJECT!)
+5) Unlock dst
+6) Continue
+
+dispatch_accepted : 2152 -> handle_mapw : 2002
+-> do_mapw : 1099 (MF_ARCHIP | MF_LOAD | MF_EXCLUSIVE | MF_FORCE) (XXX: Asserts dst lock)
+-> req2objs : 444
+-> do_copyups : 361
+
 ## CLONE (X_CLONE w/ origin)
 ## COMPOSE (X_CREATE)
 ## REMOVE (X_DELETE)
@@ -37,3 +56,4 @@ dispatch_accepted : 2152 -> handle_snapshot : 2067
 NOTES:
 - map_action(action, pr, name, namelen, flags) : 1896 (XXX: Does the locking!)
 - get_ready_map(pr, name, namelen, flags) : 1869
+- get_mapping(map, start + i) : 161
