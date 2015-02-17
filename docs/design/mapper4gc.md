@@ -70,7 +70,7 @@ dispatch_accepted : 2152 -> handle_mapw : 2002
 Cloning is the creation of a RO volume from a snapshot.
 
 1. Lock map (parent) & clone_map (dst)
-2. Message GC queue: [RO+1] for overlapped size
+2. Message GC queue: [RO+1] for overlapped size (XXX: The clone vol can be larger!)
 
     |--> on fail: Abort
 
@@ -121,7 +121,7 @@ Deletion of a map (=> deletion of a volume).
 
     |--> on fail: Abort
 
-3. Message GC queue: ?
+3. Message GC queue: [RO-1, RW-1]
 
     |--> on fail: Log (_STALE OBJECTS!_)
 
@@ -135,6 +135,11 @@ dispatch_accepted : 2152 -> handle_destroy : 2018
 ```
 - - -
 NOTES:
-- `map_action(action, pr, name, namelen, flags)` : 1896 (XXX: Does the locking!)
+
+- `map_action(action, pr, name, namelen, flags)` : 1896 (XXX: Does the
+  "locking"!)
 - `get_ready_map(pr, name, namelen, flags)` : 1869
 - `get_mapping(map, start + i)` : 161
+- `MF_ARCHIP` flag is obsolete.
+- `MF_FORCE` flag forces blocking/non-blocking (and error) on blocker
+  operations.
