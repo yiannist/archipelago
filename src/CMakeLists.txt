@@ -77,5 +77,9 @@ set_target_properties(archip-mapperd
 	COMPILE_DEFINITIONS "ST_THREADS"
 	)
 
+set(GC_SRC gc/consumer.c gc/utils.c)
+add_executable(archip-gc-consumer ${GC_SRC})
+target_link_libraries(archip-gc-consumer rabbitmq lz4)
+
 INSTALL_TARGETS(/bin archip-filed archip-radosd archip-vlmcd archip-mapperd
 	archip-bench archip-dummy archip-benchfd)
