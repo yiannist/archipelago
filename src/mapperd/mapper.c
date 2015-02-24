@@ -35,6 +35,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "mapper.h"
 #include "mapper-versions.h"
 #include "mapper-helpers.h"
+#include "notify.h"
 
 uint64_t accepted_req_count = 0;
 
@@ -669,6 +670,7 @@ static int write_snapshot(struct peer_req *pr, struct map *snap_map)
         }
     }
 
+    notify("RO", REF_INC);
     map->epoch++;
     r = write_map(pr, map);
     if (r < 0) {
