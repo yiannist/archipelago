@@ -290,9 +290,12 @@ struct map {
     char *vol_array;
 };
 
+#define MAX_GC_QUEUE_LEN 255
+
 struct mapperd {
     xport bportno;              /* blocker that accesses data */
     xport mbportno;             /* blocker that accesses maps */
+    char gc_queue[MAX_GC_QUEUE_LEN]; /* queue that accepts GC messages */
     GHashTable *cached_maps;
 };
 

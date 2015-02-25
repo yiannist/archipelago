@@ -50,7 +50,8 @@ void custom_peer_usage()
 {
     fprintf(stderr, "Custom peer options: \n"
             "-bp  : port for block blocker(!)\n"
-            "-mbp : port for map blocker\n" "\n");
+            "-mbp : port for map blocker\n"
+            "--gc-queue : queue for GC\n" "\n");
 }
 
 static int map_action(int (action) (struct peer_req * pr, struct map * map),
@@ -2293,6 +2294,7 @@ int custom_peer_init(struct peerd *peer, int argc, char *argv[])
     BEGIN_READ_ARGS(argc, argv);
     READ_ARG_ULONG("-bp", mapper->bportno);
     READ_ARG_ULONG("-mbp", mapper->mbportno);
+    READ_ARG_STRING("--gc-gueue", mapper->gc_queue, MAX_GC_QUEUE_LEN);
     END_READ_ARGS();
     if (mapper->bportno == -1) {
         XSEGLOG2(&lc, E, "Portno for blocker must be provided");
@@ -2301,6 +2303,11 @@ int custom_peer_init(struct peerd *peer, int argc, char *argv[])
     }
     if (mapper->mbportno == -1) {
         XSEGLOG2(&lc, E, "Portno for mblocker must be provided");
+        usage(argv[0]);
+        return -1;
+    }
+    if (!mapper->gc_queue[0]) {
+        XSEGLOG2(&lc, E, "Queue for GC must be provided");
         usage(argv[0]);
         return -1;
     }
