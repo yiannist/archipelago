@@ -35,13 +35,13 @@ int init_gc(sender_state_t *state, char *gc_queue) {
 }
 
 int notify_gc(sender_state_t state, char *obj_name, ref_change change) {
-    char *buf = (char *) malloc(100); // TODO: Fix hardcoded size
+    char *buf = calloc(256, sizeof(char)); // TODO: Fix hardcoded size
     char *ref_change_str;
     message_t message;
 
-    strlcpy(buf, obj_name, sizeof(buf));
+    strlcpy(buf, obj_name, 256);
     ref_change_str = ref_change2str(change);
-    strlcat(buf, ref_change_str, 100);
+    strlcat(buf, ref_change_str, 256);
 
     prepare_message(&message, buf, strlen(buf));
     send_message(state, message);
