@@ -671,7 +671,7 @@ static int write_snapshot(struct peer_req *pr, struct map *snap_map)
         }
     }
 
-    notify("RO", REF_INC);
+    notify_gc("RO", REF_INC);
     map->epoch++;
     r = write_map(pr, map);
     if (r < 0) {

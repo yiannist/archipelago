@@ -4,6 +4,6 @@
 typedef enum {REF_INC, REF_PLUS2, REF_DEC, REF_MINUS2} ref_change;
 
 // TODO: Add proper type for obj.
-int notify(char *obj, ref_change change);
+int notify_gc(char *obj, ref_change change);
 
 #endif /* NOTIFY_H */

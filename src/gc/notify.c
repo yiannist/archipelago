@@ -26,7 +26,7 @@ char* ref_change2str(ref_change change) {
     return buf;
 }
 
-int notify(char *obj_name, ref_change change) {
+int notify_gc(char *obj_name, ref_change change) {
     char *buf = (char *) malloc(100); //TODO: Fix hardcoded size
     char *ref_change_str;
     sender_state_t state;
