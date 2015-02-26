@@ -39,11 +39,15 @@ int notify_gc(sender_state_t state, char *obj_name, ref_change change) {
     char *ref_change_str;
     message_t message;
 
+    // XXX: We should "prepare" the message here for sending by defining a
+    //      messaging protocol/spec.
     strlcpy(buf, obj_name, 256);
     ref_change_str = ref_change2str(change);
     strlcat(buf, ref_change_str, 256);
 
-    prepare_message(&message, buf, strlen(buf));
+    // Create a proper GC message (e.g. LZ4-compressed)
+    prepare_message(state, &message, buf, strlen(buf));
+
     send_message(state, message);
 
     return 0;

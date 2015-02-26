@@ -72,7 +72,8 @@ set(MAPPERD_SRC mapperd/mapper.c peer.c util/hash.c mapperd/mapper-handling.c
     mapperd/mapper-version0.c mapperd/mapper-version2.c
     util/common.c gc/utils.c gc/sender_amqp.c gc/notify.c)
 add_executable(archip-mapperd ${MAPPERD_SRC})
-target_link_libraries(archip-mapperd xseg st crypto rabbitmq ${GLIB_LIBRARIES})
+target_link_libraries(archip-mapperd xseg st crypto rabbitmq lz4
+                      ${GLIB_LIBRARIES})
 set_target_properties(archip-mapperd
 	PROPERTIES
 	COMPILE_DEFINITIONS "ST_THREADS"
