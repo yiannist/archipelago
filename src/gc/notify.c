@@ -26,17 +26,23 @@ char* ref_change2str(ref_change change) {
     return buf;
 }
 
-int notify_gc(char *obj_name, ref_change change) {
-    char *buf = (char *) malloc(100); //TODO: Fix hardcoded size
+// XXX: Maybe this abstraction is too much
+int init_gc(sender_state_t *state, char *gc_queue) {
+
+    init_state(state, gc_queue);
+
+    return 0;
+}
+
+int notify_gc(sender_state_t state, char *obj_name, ref_change change) {
+    char *buf = (char *) malloc(100); // TODO: Fix hardcoded size
     char *ref_change_str;
-    sender_state_t state;
     message_t message;
 
     strlcpy(buf, obj_name, sizeof(buf));
     ref_change_str = ref_change2str(change);
     strlcat(buf, ref_change_str, 100);
 
-    init_state(&state);
     prepare_message(&message, buf, strlen(buf));
     send_message(state, message);
 

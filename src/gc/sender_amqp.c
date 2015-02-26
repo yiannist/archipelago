@@ -16,10 +16,10 @@ struct amqp_message {
     amqp_bytes_t data;
 };
 
-int init_state(sender_state_t *state) {
+int init_state(sender_state_t *state, char *gc_queue) {
     amqp_connection_state_t conn;
     amqp_socket_t *socket = NULL;
-    amqp_bytes_t queuename = amqp_cstring_bytes("archipelago");
+    amqp_bytes_t queuename = amqp_cstring_bytes(gc_queue);
     struct amqp_state *amqp_state;
     int status;
 

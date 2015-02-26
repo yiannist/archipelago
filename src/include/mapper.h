@@ -30,6 +30,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <mapper-version3.h>
 #include <glib.h>
 
+#include "sender.h"
+
 /* Alternative, each header file could define an appropriate MAP_V# */
 enum { MAP_V0, MAP_V1, MAP_V2, MAP_V3};
 #define MAP_LATEST_VERSION MAP_V3
@@ -290,12 +292,14 @@ struct map {
     char *vol_array;
 };
 
+// 255 is the max queuename len in RabbitMQ
 #define MAX_GC_QUEUE_LEN 255
 
 struct mapperd {
-    xport bportno;              /* blocker that accesses data */
-    xport mbportno;             /* blocker that accesses maps */
+    xport bportno;                   /* blocker that accesses data */
+    xport mbportno;                  /* blocker that accesses maps */
     char gc_queue[MAX_GC_QUEUE_LEN]; /* queue that accepts GC messages */
+    sender_state_t gc_state;         /* GC state */
     GHashTable *cached_maps;
 };
 

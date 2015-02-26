@@ -35,6 +35,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "mapper.h"
 #include "mapper-versions.h"
 #include "mapper-helpers.h"
+#include "sender.h"
 #include "notify.h"
 
 uint64_t accepted_req_count = 0;
@@ -49,8 +50,8 @@ char *zero_block =
 void custom_peer_usage()
 {
     fprintf(stderr, "Custom peer options: \n"
-            "-bp  : port for block blocker(!)\n"
-            "-mbp : port for map blocker\n"
+            "-bp        : port for block blocker(!)\n"
+            "-mbp       : port for map blocker\n"
             "--gc-queue : queue for GC\n" "\n");
 }
 
@@ -634,6 +635,8 @@ static int write_snapshot(struct peer_req *pr, struct map *snap_map)
     struct mapper_io *mio = __get_mapper_io(pr);
     struct map *map = mio->first_map;
     struct map old_map;
+    struct mapperd *mapper = __get_mapperd(pr->peer);
+    sender_state_t gc_state = mapper->gc_state;
 
     old_map = *map;
 
@@ -671,7 +674,8 @@ static int write_snapshot(struct peer_req *pr, struct map *snap_map)
         }
     }
 
-    notify_gc("RO", REF_INC);
+    notify_gc(gc_state, "RO", REF_INC);
+
     map->epoch++;
     r = write_map(pr, map);
     if (r < 0) {
@@ -2294,7 +2298,7 @@ int custom_peer_init(struct peerd *peer, int argc, char *argv[])
     BEGIN_READ_ARGS(argc, argv);
     READ_ARG_ULONG("-bp", mapper->bportno);
     READ_ARG_ULONG("-mbp", mapper->mbportno);
-    READ_ARG_STRING("--gc-gueue", mapper->gc_queue, MAX_GC_QUEUE_LEN);
+    READ_ARG_STRING("--gc-queue", mapper->gc_queue, MAX_GC_QUEUE_LEN);
     END_READ_ARGS();
     if (mapper->bportno == -1) {
         XSEGLOG2(&lc, E, "Portno for blocker must be provided");
@@ -2323,6 +2327,10 @@ int custom_peer_init(struct peerd *peer, int argc, char *argv[])
     req_cond = st_cond_new();
 
 //      test_map(peer);
+
+    sender_state_t gc_state;
+    init_gc(&gc_state, mapper->gc_queue);
+    mapper->gc_state = gc_state;
 
     return 0;
 }
