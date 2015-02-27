@@ -70,18 +70,18 @@ target_link_libraries(archip-vlmcd xseg)
 set(MAPPERD_SRC mapperd/mapper.c peer.c util/hash.c mapperd/mapper-handling.c
     mapperd/mapper-version3.c mapperd/mapper-helpers.c
     mapperd/mapper-version0.c mapperd/mapper-version2.c
-    util/common.c gc/utils.c gc/sender_amqp.c gc/notify.c)
+    util/common.c gc/utils.c gc/sender_amqp.c gc/notify.c util/logger_wrap.cc)
 add_executable(archip-mapperd ${MAPPERD_SRC})
-target_link_libraries(archip-mapperd xseg st crypto rabbitmq lz4
+target_link_libraries(archip-mapperd xseg st crypto rabbitmq lz4 log4cplus
                       ${GLIB_LIBRARIES})
 set_target_properties(archip-mapperd
 	PROPERTIES
 	COMPILE_DEFINITIONS "ST_THREADS"
 	)
 
-set(GC_SRC gc/consumer.c gc/utils.c)
+set(GC_SRC gc/consumer.c gc/utils.c util/logger_wrap.cc)
 add_executable(archip-gc-consumer ${GC_SRC})
-target_link_libraries(archip-gc-consumer rabbitmq lz4)
+target_link_libraries(archip-gc-consumer rabbitmq lz4 log4cplus)
 
 INSTALL_TARGETS(/bin archip-filed archip-radosd archip-vlmcd archip-mapperd
 	archip-bench archip-dummy archip-benchfd)
