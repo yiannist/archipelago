@@ -6,8 +6,11 @@
 #include <amqp.h>
 #include <amqp_framing.h>
 #include <lz4.h>
+#include <logger.h>
 
 #include "utils.h"
+
+Logger_t *logger;
 
 int main(int argc, char const *const *argv)
 {
@@ -22,6 +25,15 @@ int main(int argc, char const *const *argv)
         exit(1);
     }
 
+    // Init LOG4CPLUS logger
+    logger = logger_new("/etc/archipelago/logging.conf", "log_gc_consumer");
+    if (!logger) {
+        fprintf(stderr, "Could not initialize Log4cplus logger."
+              "GC logging will not work .\n");
+    }
+
+    flogger_info(logger, "Starting GC consumer");
+
     queuename = amqp_cstring_bytes(argv[1]);
 
     // AMQP stuff
@@ -29,12 +41,14 @@ int main(int argc, char const *const *argv)
 
     socket = amqp_tcp_socket_new(conn);
     if (!socket) {
-        die("Creating TCP socket");
+        flogger_error(logger, "Creating TCP socket");
+        exit(1);
     }
 
     status = amqp_socket_open(socket, "localhost", 5672);
     if (status) {
-        die("Opening socket");
+        flogger_error(logger, "Opening socket");
+        exit(1);
     }
 
     die_on_amqp_error(amqp_login(conn, "/", 0, 131072, 0, AMQP_SASL_METHOD_PLAIN,
@@ -43,23 +57,11 @@ int main(int argc, char const *const *argv)
     amqp_channel_open(conn, 1);
     die_on_amqp_error(amqp_get_rpc_reply(conn), "Opening channel");
 
-    amqp_queue_declare(conn,
-                       1,
-                       queuename,
-                       0,
-                       1, // durable
-                       0,
-                       0,
+    amqp_queue_declare(conn, 1, queuename, 0,  1 /* durable */, 0, 0,
                        amqp_empty_table);
     die_on_amqp_error(amqp_get_rpc_reply(conn), "Declaring queue");
 
-    amqp_basic_consume(conn,
-                       1,
-                       queuename,
-                       amqp_empty_bytes,
-                       0,
-                       1,
-                       0,
+    amqp_basic_consume(conn, 1, queuename, amqp_empty_bytes, 0, 1, 0,
                        amqp_empty_table);
     die_on_amqp_error(amqp_get_rpc_reply(conn), "Consuming");
 
