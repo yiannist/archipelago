@@ -873,7 +873,7 @@ static int __write_meta_v3(struct peer_req *pr, struct map *map)
 
     if (map->cas_array != NULL) {
         for (i = 0; i < map->cas_nr; i++) {
-            unhexlify(map->cas_names[1], cas_buf + i * map->hex_cas_size/2);
+            unhexlify(map->cas_names[i], cas_buf + i * map->hex_cas_size/2);
         }
         vol_buf += i * map->hex_cas_size/2;
     }
@@ -1143,9 +1143,10 @@ static void load_meta_v3_cb(struct peer_req *pr, struct xseg_request *req)
             goto out_err;
         }
 
-        for (i = 0; i < map->hex_cas_array_len/2; i+=map->hex_cas_size/2) {
-            hexlify((unsigned char *)map->cas_array + i * map->hex_cas_size,
-                    map->hex_cas_size/2, (unsigned char *)data + i *  map->hex_cas_size/2);
+        for (i = 0; i < map->hex_cas_array_len/map->hex_cas_size; i++) {
+            hexlify((unsigned char *)data + i *  map->hex_cas_size/2,
+                     map->hex_cas_size/2,
+                     (unsigned char *)map->cas_array + i * map->hex_cas_size);
             // build index
             map->cas_names[i] = map->cas_array + i * map->hex_cas_size;
         }
@@ -1200,6 +1201,10 @@ out_err:
     free(map->cas_array);
     free(map->vol_names);
     free(map->vol_array);
+    map->cas_names = NULL;
+    map->cas_array = NULL;
+    map->vol_names = NULL;
+    map->vol_array = NULL;
     mio->err = 1;
     goto out;
 }
