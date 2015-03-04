@@ -77,8 +77,7 @@ int prepare_message(sender_state_t state, message_t *message, char *buffer,
     struct amqp_state *amqp_state = (struct amqp_state*) state;
     LZ4_stream_t *const lz4_stream = amqp_state->lz4_stream;
     struct amqp_message *amqp_message = malloc(sizeof(struct amqp_message));
-    char *compression_buf =
-        malloc(LZ4_COMPRESSBOUND(256)); /* XXX: Message len is 256 */
+    char *compression_buf = malloc(LZ4_COMPRESSBOUND(COMPR_BUF_SIZE));
     int compressed_bytes;
 
     flogger_info(logger, "Preparing message: '%s' for sending", buffer);

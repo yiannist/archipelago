@@ -92,10 +92,11 @@ int main(int argc, char const *const *argv)
             if (is_compressed) {
                 printf(" --> Data is LZ4-compressed. Trying to uncompress"
                        "...\n");
-                message = malloc(LZ4_COMPRESSBOUND(100));
+                message = malloc(LZ4_COMPRESSBOUND(COMPR_BUF_SIZE));
                 message_bytes = LZ4_decompress_safe_continue(lz4_stream_decode,
                                                              cmpBuf, message,
-                                                             cmpBytes, 100);
+                                                             cmpBytes,
+                                                             COMPR_BUF_SIZE);
             } else {
                 message_bytes = cmpBytes;
                 message = cmpBuf;
