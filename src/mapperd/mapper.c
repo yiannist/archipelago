@@ -1180,6 +1180,121 @@ static int do_clone(struct peer_req *pr, struct map *map)
     return r;
 }
 
+static int write_copymap(struct peer_req *pr, struct map *copy_map)
+{
+    int r;
+    uint64_t i;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    struct map *map = mio->first_map;
+
+    if (copy_map->state & MF_MAP_LOADED) {
+        // assert(map->opened_count != mio->count);
+        return -EEXIST;
+    }
+
+    if (!(copy_map->state & MF_MAP_EXCLUSIVE)) {
+        XSEGLOG2(&lc, E, "Could not open copy map");
+        XSEGLOG2(&lc, E, "Target exists");
+        return -EEXIST;
+    }
+
+    copy_map->state |= MF_MAP_CREATING;
+
+    r = load_map_metadata(pr, copy_map);
+    if (r >= 0 & !(copy_map->flags & MF_MAP_DELETED)) {
+        XSEGLOG2(&lc, E, "Target exists");
+        r = -EEXIST;
+        goto out;
+    }
+
+    copy_map->epoch++;
+
+    /* "Steal" attributes from map, to write copy */
+    copy_map->flags = map->flags;
+    copy_map->size = map->size;
+    copy_map->blocksize = map->blocksize;
+    copy_map->nr_objs = map->nr_objs;
+    copy_map->objects = map->objects;
+
+    copy_map->hex_cas_size = map->hex_cas_size;
+    copy_map->hex_cas_array_len = map->hex_cas_array_len;
+    copy_map->vol_array_len = map->vol_array_len;
+    copy_map->cur_vol_idx = map->cur_vol_idx;
+    copy_map->cas_array = map->cas_array;
+    copy_map->vol_array = map->vol_array;
+    copy_map->cas_names = map->cas_names;
+    copy_map->vol_names = map->vol_names;
+    copy_map->cas_nr = map->cas_nr;
+    copy_map->vol_nr = map->vol_nr;
+
+    copy_map->state |= MF_MAP_LOADED;
+
+    r = write_map(pr, copy_map);
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Could not write copy map");
+        r = -EIO;
+        goto out;
+    }
+
+    r = 0;
+
+out:
+    // assert(map->opened_count == mio->count);
+    if (copy_map->opened_count == mio->count) {
+        initialize_map_fields(copy_map);
+        copy_map->state &= ~MF_MAP_LOADED;
+        close_map(pr, copy_map);
+    }
+    copy_map->state &= ~MF_MAP_CREATING;
+
+    return r;
+}
+
+static int do_copy(struct peer_req *pr, struct map *map)
+{
+    int r;
+    struct peerd *peer = pr->peer;
+    struct mapper_io *mio = __get_mapper_io(pr);
+    char *target = xseg_get_target(peer->xseg, pr->req);
+
+    if (!(map->flags & MF_MAP_READONLY)) {
+        XSEGLOG2(&lc, E, "Copying is supported only from read-only resources");
+        return -EINVAL;
+    }
+
+    if (!(map->state & MF_MAP_EXCLUSIVE)) {
+        XSEGLOG2(&lc, E, "Map was not opened exclusively");
+        return -1;
+    }
+
+    map->state |= MF_MAP_COPYING;
+    mio->first_map = map;
+
+    XSEGLOG2(&lc, I, "Copying map %s", map->volume);
+
+
+    r = map_action(write_copymap, pr, target, pr->req->targetlen,
+                    MF_CREATE | MF_EXCLUSIVE | MF_SERIALIZE);
+    if (r < 0) {
+        XSEGLOG2(&lc, W, "Could not copy map %s", map->volume);
+    }
+
+out:
+    map->state &= ~MF_MAP_COPYING;
+
+    if (map->opened_count == mio->count) {
+        close_map(pr, map);
+    }
+
+    if (r < 0) {
+        XSEGLOG2(&lc, E, "Copy of map %s failed", map->volume);
+    } else {
+        XSEGLOG2(&lc, I, "Copy of map %s completed", map->volume);
+    }
+
+    return r;
+}
+
 static int truncate_map(struct peer_req *pr, struct map *map, uint64_t offset)
 {
     struct peerd *peer = pr->peer;
@@ -1792,6 +1907,37 @@ void *handle_info(struct peer_req *pr)
     return NULL;
 }
 
+void *handle_copy(struct peer_req *pr)
+{
+    int r;
+    struct peerd *peer = pr->peer;
+    //struct mapperd *mapper = __get_mapperd(peer);
+    char *target = xseg_get_target(peer->xseg, pr->req);
+    struct xseg_request_copy *xcopy;
+
+    xcopy = (struct xseg_request_copy *)xseg_get_data(peer->xseg, pr->req);
+    if (!xcopy) {
+        r = -EINVAL;
+        goto out;
+    }
+
+    if (xcopy->targetlen) {
+        r = map_action(do_copy, pr, xcopy->target, xcopy->targetlen,
+                       MF_LOAD | MF_ARCHIP | MF_EXCLUSIVE | MF_SERIALIZE);
+    } else {
+        r = -EINVAL;
+    }
+
+out:
+    if (r < 0) {
+        fail(peer, pr);
+    } else {
+        complete(peer, pr);
+    }
+    ta--;
+    return NULL;
+}
+
 void *handle_clone(struct peer_req *pr)
 {
     int r;
@@ -2059,6 +2205,9 @@ int dispatch_accepted(struct peerd *peer, struct peer_req *pr,
         break;
     case X_UPDATE:
         action = handle_update;
+        break;
+    case X_COPY:
+        action = handle_copy;
         break;
     default:
         fprintf(stderr, "mydispatch: unknown op\n");
