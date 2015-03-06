@@ -1,0 +1,89 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2010-2014 GRNET S.A.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+import os
+from sys import argv, exit
+from archipelago.common import (
+        loadrc,
+        Error
+)
+from archipelago.vlmc import (
+    list_volumes,
+    update_volume,
+    close_volume,
+)
+
+def upgrade_to_v3(name, assume_v0=False, v0_size=-1):
+    try:
+        update_volume(name, assume_v0=assume_v0, v0_size=v0_size)
+        close_volume(name)
+        return True
+    except Error, msg:
+        return False
+
+def vol_upgrade_to_v3(volume, assume_v0=False, v0_size=-1):
+    return upgrade_to_v3(volume.name, assume_v0=assume_v0, v0_size=v0_size)
+
+def finalize_upgrade_v05(logdir=None):
+    loadrc(None)
+
+    if logdir is None:
+        logdir=''
+
+    logfile = open(os.path.join(logdir, 'upgraded.log'), 'w+')
+    invalid = open(os.path.join(logdir, 'invalid.log'), 'w+')
+    failed = open(os.path.join(logdir, 'failed.log'), 'w+')
+
+    error = False
+    for v in list_volumes():
+        if v.version == 1:
+            # Log warning. Version 1 should not exist
+            pass
+        elif v.version == 2:
+            if not vol_upgrade_to_v3(v):
+                error = True
+                failed.write("Failed to upgrade %s\n" % v.name)
+            else:
+                logfile.write("Upgraded %s\n" % v.name)
+
+    logfile.close()
+    invalid.close()
+    failed.close()
+
+    return not error
+
+if __name__ == '__main__':
+
+    argc = len(argv)
+    if argc != 1 and argc != 3:
+        print "Usage: %s [-l <log directory>]" % argv[0]
+        exit(1)
+    elif argc == 3:
+        if argv[1] != '-l':
+            print "Usage: %s [-l <log directory>]" % argv[0]
+            exit(1)
+        logdir = argv[2]
+    else:
+        logdir = None
+
+    if finalize_upgrade_v05(logdir=logdir):
+        print "OK"
+        exit(0)
+    else:
+        print "Failed"
+        exit(1)
