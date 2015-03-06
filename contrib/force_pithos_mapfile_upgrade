@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2010-2014 GRNET S.A.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+import os
+from sys import argv, exit
+from archipelago.common import (
+        loadrc,
+        Error
+)
+from archipelago.vlmc import (
+    update_volume,
+    close_volume,
+)
+
+def upgrade_to_latest_version(name, assume_v0=False, v0_size=-1):
+    ret = True
+    try:
+        update_volume(name, assume_v0=assume_v0, v0_size=v0_size)
+    except Error, msg:
+        ret = False
+    finally:
+        close_volume(name)
+
+    return ret
+
+def get_pithos_mapfiles():
+
+    from sqlalchemy import select
+    from pithos.api.util import get_backend
+
+    b = get_backend()
+    versions = b.node.versions
+    s = select([versions.c.mapfile, versions.c.size],
+                       versions.c.mapfile != None)
+    rp = b.node.conn.execute(s)
+    l = rp.fetchall()
+    rp.close()
+    b.close()
+
+    return l
+
+def force_pithos_upgrade(logdir=None):
+    loadrc(None)
+    if logdir is None:
+        logdir=''
+
+    logfile = open(os.path.join(logdir, 'upgraded.log'), 'w+')
+    failed = open(os.path.join(logdir, 'failed.log'), 'w+')
+
+    error = False
+    for (f, size) in get_pithos_mapfiles():
+        if not upgrade_to_latest_version(f, assume_v0=True, v0_size=size):
+            error = True
+            failed.write("Failed to upgrade %s\n" % f)
+        else:
+            logfile.write("Upgraded %s\n" % f)
+
+    logfile.close()
+    failed.close()
+
+    return not Error
+
+if __name__ == '__main__':
+
+    argc = len(argv)
+    if argc != 1 and argc != 3:
+        print "Usage: %s [-l <log directory>]" % argv[0]
+        exit(1)
+    elif argc == 3:
+        if argv[1] != '-l':
+            print "Usage: %s [-l <log directory>]" % argv[0]
+            exit(1)
+        logdir = argv[2]
+    else:
+        logdir = None
+
+    if force_pithos_upgrade(logdir=logdir):
+        print "OK"
+        exit(0)
+    else:
+        print "Failed"
+        exit(1)
