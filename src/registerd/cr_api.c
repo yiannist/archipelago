@@ -4,7 +4,8 @@
 #include <rados/librados.h>
 #include "api_types.h"
 
-#define MAX_CR_OBJECT_LEN 100
+/* API implementation-specific */
+#define MAX_CR_OBJECT_NAME 100
 
 static rados_ioctx_t ioctx;
 
@@ -14,9 +15,9 @@ void create_cr_object_name(char *buf, size_t n, uuid_t id) {
 }
 
 int is_registered(uuid_t client_id) {
-    char cr_obj[MAX_CR_OBJECT_LEN];
+    char cr_obj[MAX_CR_OBJECT_NAME];
 
-    create_cr_object_name(cr_obj, MAX_CR_OBJECT_LEN, client_id);
+    create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
     if (rados_stat(ioctx, cr_obj, NULL, NULL) == -ENOENT) {
 	return 0;
@@ -54,7 +55,7 @@ struct conf_registry_state {
  */
 int register_client(uuid_t client_id, endpoint_t client_config_endpoint,
 		    info_t client_info) {
-    char cr_obj[MAX_CR_OBJECT_LEN];
+    char cr_obj[MAX_CR_OBJECT_NAME];
     struct conf_registry_state *state = malloc(sizeof(struct conf_registry_state));
 
     if (!is_registered(client_id)) {
@@ -64,7 +65,7 @@ int register_client(uuid_t client_id, endpoint_t client_config_endpoint,
 	state->client_info = client_info;
 	state->client_config = "";
 
-	create_cr_object_name(cr_obj, MAX_CR_OBJECT_LEN, client_id);
+	create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
 	if (rados_write_full(ioctx, cr_obj, (char *) state,
 			     sizeof(struct conf_registry_state)) < 0) {
@@ -92,9 +93,9 @@ int register_client(uuid_t client_id, endpoint_t client_config_endpoint,
   client_id.
  */
 int set_client_status(uuid_t client_id, client_status_t status) {
-    char cr_obj[MAX_CR_OBJECT_LEN];
+    char cr_obj[MAX_CR_OBJECT_NAME];
 
-    create_cr_object_name(cr_obj, MAX_CR_OBJECT_LEN, client_id);
+    create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
     // XXX: Would it be better to write full conf_registry_state?
     if (rados_write(ioctx, cr_obj, (char *) &status, sizeof(client_status_t),
@@ -114,10 +115,10 @@ int set_client_status(uuid_t client_id, client_status_t status) {
   client_id.
  */
 int get_client_info(uuid_t client_id, info_t *client_info) {
-    char cr_obj[MAX_CR_OBJECT_LEN];
+    char cr_obj[MAX_CR_OBJECT_NAME];
     int info_offset = sizeof(uuid_t) + sizeof(client_status_t) + sizeof(endpoint_t);
 
-    create_cr_object_name(cr_obj, MAX_CR_OBJECT_LEN, client_id);
+    create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
     if (rados_read(ioctx, cr_obj, (char *) client_info, sizeof(info_t),
 		   info_offset) < 0) {
@@ -138,11 +139,11 @@ int get_client_info(uuid_t client_id, info_t *client_info) {
   client_id.
  */
 int get_client_config(uuid_t client_id, config_t *client_config) {
-    char cr_obj[MAX_CR_OBJECT_LEN];
+    char cr_obj[MAX_CR_OBJECT_NAME];
     int config_offset = sizeof(uuid_t) + sizeof(client_status_t) + sizeof(endpoint_t) +
 	sizeof(info_t);
 
-    create_cr_object_name(cr_obj, MAX_CR_OBJECT_LEN, client_id);
+    create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
     if (rados_read(ioctx, cr_obj, (char *) client_config, sizeof(config_t),
 		   config_offset) < 0) {
@@ -164,11 +165,11 @@ int get_client_config(uuid_t client_id, config_t *client_config) {
   client_id.
  */
 int set_client_config(uuid_t client_id, config_t config) {
-    char cr_obj[MAX_CR_OBJECT_LEN];
     int config_offset = sizeof(uuid_t) + sizeof(client_status_t) + sizeof(endpoint_t) +
 	sizeof(info_t);
+    char cr_obj[MAX_CR_OBJECT_NAME];
 
-    create_cr_object_name(cr_obj, MAX_CR_OBJECT_LEN, client_id);
+    create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
     // XXX: Would it be better to write full conf_registry_state?
     if (rados_write(ioctx, cr_obj, (char *) &config, sizeof(config_t),
