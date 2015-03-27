@@ -224,28 +224,38 @@ int finalize() {
 }
 
 int main(int argc, char **argv) {
+    uuid_t cid;
+
+    if (argc < 2) {
+        fprintf(stderr, "Usage: ./cr_api <client_id>\n");
+        return -1;
+    }
+
     if (init() < 0) {
         fprintf(stderr, "Error in initialization.\n");
         finalize();
         return -1;
     }
 
+    // Get client id from stdin
+    cid = atoi(argv[1]);
+
     // Test various api calls
     info_t client;
-    if (register_client(1, "127.0.0.1", "My test config") < 0) {
+    if (register_client(cid, "127.0.0.1", "My test config") < 0) {
         finalize();
         return -1;
     }
 
-    set_client_status(1, FENCING);
-    get_client_info(1, &client);
+    set_client_status(cid, FENCING);
+    get_client_info(cid, &client);
     printf("Info: %s\n", client);
 
     config_t config;
-    get_client_config(1, &config);
+    get_client_config(cid, &config);
     printf("Old config: %s\n", config);
-    set_client_config(1, "nonsense!");
-    get_client_config(1, &config);
+    set_client_config(cid, "nonsense!");
+    get_client_config(cid, &config);
     printf("New config: %s\n", config);
 
     finalize();
