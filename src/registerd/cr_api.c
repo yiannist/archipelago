@@ -63,7 +63,8 @@ struct conf_registry_state {
 int register_client(uuid_t client_id, endpoint_t client_config_endpoint,
 		    info_t client_info) {
     char cr_obj[MAX_CR_OBJECT_NAME];
-    struct conf_registry_state *state = malloc(sizeof(struct conf_registry_state));
+    struct conf_registry_state *state =
+        malloc(sizeof(struct conf_registry_state));
 
     if (!is_registered(client_id)) {
 	state->client_id = client_id;
@@ -105,8 +106,8 @@ int set_client_status(uuid_t client_id, client_status_t status) {
     create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
     // XXX: Would it be better to write full conf_registry_state?
-    if (rados_write(rados->ioctx, cr_obj, (char *) &status, sizeof(client_status_t),
-		    sizeof(uuid_t)) < 0) {
+    if (rados_write(rados->ioctx, cr_obj, (char *) &status,
+                    sizeof(client_status_t), sizeof(uuid_t)) < 0) {
 	fprintf(stderr, "set_client_status: cannot write status to pool!\n");
 	return -1;
     }
@@ -123,7 +124,8 @@ int set_client_status(uuid_t client_id, client_status_t status) {
  */
 int get_client_info(uuid_t client_id, info_t *client_info) {
     char cr_obj[MAX_CR_OBJECT_NAME];
-    int info_offset = sizeof(uuid_t) + sizeof(client_status_t) + sizeof(endpoint_t);
+    int info_offset = sizeof(uuid_t) + sizeof(client_status_t)
+        + sizeof(endpoint_t);
 
     create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
@@ -147,13 +149,13 @@ int get_client_info(uuid_t client_id, info_t *client_info) {
  */
 int get_client_config(uuid_t client_id, config_t *client_config) {
     char cr_obj[MAX_CR_OBJECT_NAME];
-    int config_offset = sizeof(uuid_t) + sizeof(client_status_t) + sizeof(endpoint_t) +
-	sizeof(info_t);
+    int config_offset = sizeof(uuid_t) + sizeof(client_status_t) +
+        sizeof(endpoint_t) + sizeof(info_t);
 
     create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
-    if (rados_read(rados->ioctx, cr_obj, (char *) client_config, sizeof(config_t),
-		   config_offset) < 0) {
+    if (rados_read(rados->ioctx, cr_obj, (char *) client_config,
+                   sizeof(config_t), config_offset) < 0) {
 	fprintf(stderr, "get_client_config: cannot get config from pool!\n");
 	return -1;
     }
