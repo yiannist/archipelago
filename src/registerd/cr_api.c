@@ -2,14 +2,22 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <rados/librados.h>
+#include <bsd/string.h>
 #include "api_types.h"
 
 /* API implementation-specific */
 #define MAX_CR_OBJECT_NAME 100
+#define MAX_POOL_NAME 64
 
-static rados_ioctx_t ioctx;
+struct radosd {
+    rados_t cluster;
+    rados_ioctx_t ioctx;
+    char pool[MAX_POOL_NAME + 1];
+};
 
-// ---- Utils ----
+static struct radosd *rados;
+
+/* Utils */
 void create_cr_object_name(char *buf, size_t n, uuid_t id) {
     snprintf(buf, n, "cr_object_%d", id);
 }
@@ -19,13 +27,12 @@ int is_registered(uuid_t client_id) {
 
     create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
-    if (rados_stat(ioctx, cr_obj, NULL, NULL) == -ENOENT) {
+    if (rados_stat(rados->ioctx, cr_obj, NULL, NULL) == -ENOENT) {
 	return 0;
-    } else {
-	return 1;
     }
+
+    return 1;
 }
-// ---------------
 
 /* TYPES */
 
@@ -67,7 +74,7 @@ int register_client(uuid_t client_id, endpoint_t client_config_endpoint,
 
 	create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
-	if (rados_write_full(ioctx, cr_obj, (char *) state,
+	if (rados_write_full(rados->ioctx, cr_obj, (char *) state,
 			     sizeof(struct conf_registry_state)) < 0) {
 	    fprintf(stderr, "register_client: cannot write to pool!\n");
 	    return -1;
@@ -98,7 +105,7 @@ int set_client_status(uuid_t client_id, client_status_t status) {
     create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
     // XXX: Would it be better to write full conf_registry_state?
-    if (rados_write(ioctx, cr_obj, (char *) &status, sizeof(client_status_t),
+    if (rados_write(rados->ioctx, cr_obj, (char *) &status, sizeof(client_status_t),
 		    sizeof(uuid_t)) < 0) {
 	fprintf(stderr, "set_client_status: cannot write status to pool!\n");
 	return -1;
@@ -120,7 +127,7 @@ int get_client_info(uuid_t client_id, info_t *client_info) {
 
     create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
-    if (rados_read(ioctx, cr_obj, (char *) client_info, sizeof(info_t),
+    if (rados_read(rados->ioctx, cr_obj, (char *) client_info, sizeof(info_t),
 		   info_offset) < 0) {
 	fprintf(stderr, "get_client_info: cannot get info from pool!\n");
 	return -1;
@@ -145,7 +152,7 @@ int get_client_config(uuid_t client_id, config_t *client_config) {
 
     create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
-    if (rados_read(ioctx, cr_obj, (char *) client_config, sizeof(config_t),
+    if (rados_read(rados->ioctx, cr_obj, (char *) client_config, sizeof(config_t),
 		   config_offset) < 0) {
 	fprintf(stderr, "get_client_config: cannot get config from pool!\n");
 	return -1;
@@ -165,14 +172,14 @@ int get_client_config(uuid_t client_id, config_t *client_config) {
   client_id.
  */
 int set_client_config(uuid_t client_id, config_t config) {
-    int config_offset = sizeof(uuid_t) + sizeof(client_status_t) + sizeof(endpoint_t) +
-	sizeof(info_t);
     char cr_obj[MAX_CR_OBJECT_NAME];
+    int config_offset = sizeof(uuid_t) + sizeof(client_status_t) +
+        sizeof(endpoint_t) + sizeof(info_t);
 
     create_cr_object_name(cr_obj, MAX_CR_OBJECT_NAME, client_id);
 
     // XXX: Would it be better to write full conf_registry_state?
-    if (rados_write(ioctx, cr_obj, (char *) &config, sizeof(config_t),
+    if (rados_write(rados->ioctx, cr_obj, (char *) &config, sizeof(config_t),
 		    config_offset) < 0) {
 	fprintf(stderr, "set_client_config: cannot write config to pool!\n");
 	return -1;
@@ -181,37 +188,55 @@ int set_client_config(uuid_t client_id, config_t config) {
     return 0;
 }
 
+int init() {
+    rados = malloc(sizeof(struct radosd));
+    strlcpy(rados->pool, "test_trololo", 13);
+
+    if (rados_create(&rados->cluster, NULL) < 0) {
+	fprintf(stderr, "Cannot create a cluster handle.\n");
+	return -1;
+    }
+
+    if (rados_conf_read_file(rados->cluster, "/etc/ceph/ceph.conf") < 0) {
+	fprintf(stderr, "Cannot read config file.\n");
+	return -1;
+    }
+
+    if (rados_connect(rados->cluster) < 0) {
+	fprintf(stderr, "Cannot connect to cluster.\n");
+	return -1;
+    }
+
+    if (rados_ioctx_create(rados->cluster, rados->pool, &rados->ioctx) < 0) {
+	fprintf(stderr, "Cannot open rados pool: %s.\n", rados->pool);
+	return -1;
+    }
+
+    return 0;
+}
+
+int finalize() {
+    rados_ioctx_destroy(rados->ioctx);
+    rados_shutdown(rados->cluster);
+    free(rados);
+
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    rados_t cluster;
-    const char *poolname = "test_trololo";
-    
-    // Connect to cluster
-    if (rados_create(&cluster, NULL) < 0) {
-	fprintf(stderr, "%s: cannot create a cluster handle.\n", argv[0]);
-	return -1;
-    }
-
-    if (rados_conf_read_file(cluster, "/etc/ceph/ceph.conf") < 0) {
-	fprintf(stderr, "%s: cannot read config file.\n", argv[0]);
-	return -1;
-    }
-
-    if (rados_connect(cluster) < 0) {
-	fprintf(stderr, "%s: cannot connect to cluster.\n", argv[0]);
-	return -1;
-    }
-
-    if (rados_ioctx_create(cluster, poolname, &ioctx) < 0) {
-	fprintf(stderr, "%s: cannot open rados pool: %s.\n", argv[0], poolname);
-	return -1;
-    }
-
-    info_t client;
-    if (register_client(1, "127.0.0.1", "My test config") < 0) {
-        goto cleanup;
+    if (init() < 0) {
+        fprintf(stderr, "Error in initialization.\n");
+        finalize();
+        return -1;
     }
 
     // Test various api calls
+    info_t client;
+    if (register_client(1, "127.0.0.1", "My test config") < 0) {
+        finalize();
+        return -1;
+    }
+
     set_client_status(1, FENCING);
     get_client_info(1, &client);
     printf("Info: %s\n", client);
@@ -223,10 +248,7 @@ int main(int argc, char **argv) {
     get_client_config(1, &config);
     printf("New config: %s\n", config);
 
-cleanup:
-    // Clean-up
-    rados_ioctx_destroy(ioctx);
-    rados_shutdown(cluster);
+    finalize();
 
     return 0;
 }
